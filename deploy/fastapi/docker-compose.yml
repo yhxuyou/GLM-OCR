@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  glm-ocr-api:
+    build:
+      context: ../../
+      dockerfile: deploy/fastapi/Dockerfile
+    container_name: glm-ocr-api
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      # GLM-OCR配置
+      - GLMOCR_MODE=selfhosted
+      # - GLMOCR_CONFIG_PATH=/app/glmocr/config.yaml
+      # - GLMOCR_MODEL=your-model-path
+      # GPU配置（根据实际情况设置）
+      # - CUDA_VISIBLE_DEVICES=0
+      # 任务队列配置
+      - MAX_QUEUE_SIZE=1000
+      - MAX_CONCURRENT_TASKS=4
+      - TASK_TIMEOUT=300
+    volumes:
+      # 挂载模型目录（如果使用本地模型）
+      # - ./models:/app/models
+      # 挂载配置文件
+      # - ./config.yaml:/app/glmocr/config.yaml:ro
+      # 挂载临时文件目录
+      - /tmp/glmocr_uploads:/tmp/glmocr_uploads
+    restart: unless-stopped
+    # GPU支持（取消注释以启用）
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
