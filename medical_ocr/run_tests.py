@@ -26,9 +26,7 @@ def test_imports():
         import medical_ocr
         print(f"   ✅ 成功导入 medical_ocr 包 (版本: {medical_ocr.__version__})")
         
-        from medical_ocr import pipeline, layout_detector
-        print(f"   ✅ 成功导入 pipeline 和 layout_detector 模块")
-        
+        print(f"   ℹ️  注意: Pipeline 和 LayoutDetector 类仅在 glmocr 已安装时可用")
         return True
     except Exception as e:
         print(f"   ❌ 导入失败: {e}")
