@@ -25,12 +25,45 @@ try:
     BASE_DETECTOR_AVAILABLE = True
 except Exception as e:
     logger.warning(f"PPDocLayoutDetector not available: {e}")
-    PPDocLayoutDetector = object
+    PPDocLayoutDetector = None
     BASE_DETECTOR_AVAILABLE = False
 
 
-class MedicalLayoutDetector(PPDocLayoutDetector):
-    """Specialized layout detector for medical documents.
+# 只有在基础检测器可用时才定义我们的类
+if BASE_DETECTOR_AVAILABLE and PPDocLayoutDetector:
+    class MedicalLayoutDetector(PPDocLayoutDetector):
+        """Specialized layout detector for medical documents.
+
+        Features:
+        - Medical document specific preprocessing
+        - Enhanced detection of medical elements (tables, charts, signatures)
+        - Post-filtering for medical-specific regions
+        - Better handling of low-quality medical scans
+        """
+
+        # Medical document specific region labels to prioritize
+        MEDICAL_LABELS = {
+            "table", "chart", "diagram", "signature",
+            "stamp", "header", "footer", "medical_record"
+        }
+
+        def __init__(self, config):
+            super().__init__(config)
+
+            # Medical-specific configuration
+            self.enable_medical_enhancement = getattr(
+                config, "enable_medical_enhancement", True
+            )
+            self.medical_threshold_multiplier = getattr(
+                config, "medical_threshold_multiplier", 0.85
+            )
+            self.min_medical_region_area = getattr(
+                config, "min_medical_region_area", 300
+            )
+            self.max_overlap_ratio = getattr(
+                config, "max_overlap_ratio", 0.85
+            )
+
 
     Features:
     - Medical document specific preprocessing
