@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "medical-ocr"
+version = "0.1.0"
+description = "Specialized OCR for medical documents, built on glmocr"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.8"
+authors = [
+    {name = "Medical OCR Team"}
+]
+keywords = ["ocr", "medical", "document-processing", "glmocr"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Healthcare Industry",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = [
+    "glmocr",
+    "opencv-python>=4.5.0",
+    "numpy>=1.19.0",
+    "Pillow>=8.0.0",
+]
+
+[project.optional-dependencies]
+server = [
+    "flask>=2.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/medical-ocr"
+Documentation = "https://github.com/your-org/medical-ocr"
+Issues = "https://github.com/your-org/medical-ocr/issues"
+
+[project.scripts]
+medical-ocr-server = "medical_ocr.server:main"
