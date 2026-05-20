@@ -53,11 +53,12 @@ class MedicalOcrPipeline(Pipeline):
         # Standard OCRClient
         self.ocr_client = OCRClient(config.ocr_api)
 
-        # ResultFormatter
+        # Use MedicalResultFormatter
+        from .result_formatter import MedicalResultFormatter
         self.result_formatter = (
             result_formatter
             if result_formatter is not None
-            else ResultFormatter(config.result_formatter)
+            else MedicalResultFormatter(config.result_formatter)
         )
 
         # Use MedicalLayoutDetector or custom one

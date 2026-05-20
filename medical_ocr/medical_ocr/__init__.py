@@ -24,4 +24,16 @@ except Exception as e:
     warnings.warn(f"Could not import MedicalLayoutDetector: {e}")
     MedicalLayoutDetector = None
 
-__all__ = ["MedicalPageLoader", "MedicalOcrPipeline", "MedicalLayoutDetector"]
+try:
+    from .result_formatter import MedicalResultFormatter
+except Exception as e:
+    import warnings
+    warnings.warn(f"Could not import MedicalResultFormatter: {e}")
+    MedicalResultFormatter = None
+
+__all__ = [
+    "MedicalPageLoader", 
+    "MedicalOcrPipeline", 
+    "MedicalLayoutDetector",
+    "MedicalResultFormatter"
+]

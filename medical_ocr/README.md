@@ -5,8 +5,9 @@
 ## 核心特点
 
 ✅ **不改变原有逻辑** - MedicalOcrPipeline 继承自 glmocr.Pipeline，所有 process() 方法完全继承  
-✅ **替换关键组件** - 使用 MedicalPageLoader 和 MedicalLayoutDetector  
+✅ **替换关键组件** - 使用 MedicalPageLoader、MedicalLayoutDetector 和 MedicalResultFormatter  
 ✅ **三阶段预处理** - YOLO 检测 -> 方向矫正 -> 畸变矫正  
+✅ **医疗专用后处理** - 医学术语标准化、医疗单位统一  
 ✅ **可无缝替换** - 现有代码只需要替换 Pipeline 类即可
 
 ## 快速开始
@@ -52,7 +53,7 @@ for result in pipeline.process(request_data):
 pipeline.stop()
 ```
 
-### 预处理流程
+### 处理流程
 
 #### MedicalPageLoader (图片预处理)
 
@@ -80,6 +81,22 @@ pipeline.stop()
 最终布局结果
 ```
 
+#### MedicalResultFormatter (结果后处理)
+
+```
+OCR识别结果
+    ↓
+1. 医学术语标准化 → BP → Blood Pressure
+    ↓
+2. 医疗单位统一 → 120/80 → 120/80 mmHg
+    ↓
+3. OCR 错误修正 → l → 1, O → 0
+    ↓
+4. 医学术语强调 → **Blood Pressure**
+    ↓
+最终格式化结果
+```
+
 ## 核心类说明
 
 ### MedicalPageLoader
@@ -103,10 +120,18 @@ pipeline.stop()
 输出: 过滤后的区域列表
 ```
 
+### MedicalResultFormatter
+继承自 `glmocr.postprocess.ResultFormatter`，增加医疗专用后处理：
+
+- 医学术语标准化（BP → Blood Pressure）
+- 医疗单位统一（血压、体温等）
+- OCR 错误修正（字母与数字混淆）
+- 医学术语强调（Markdown 加粗）
+
 ### MedicalOcrPipeline
 继承自 `glmocr.pipeline.Pipeline`：
 
-- **__init__ 唯一修改** - 替换 PageLoader 和 LayoutDetector
+- **__init__ 唯一修改** - 替换 PageLoader、LayoutDetector 和 ResultFormatter
 - **其他方法** - 完全继承自父类，无需修改
 
 ## 项目结构
@@ -114,13 +139,14 @@ pipeline.stop()
 ```
 medical_ocr/
 ├── medical_ocr/
-│   ├── __init__.py          # 包入口
-│   ├── page_loader.py       # MedicalPageLoader (图片预处理)
-│   ├── layout_detector.py   # MedicalLayoutDetector (布局后处理)
-│   ├── pipeline.py          # MedicalOcrPipeline (继承自 glmocr.Pipeline)
-│   └── uvdoc_inference.py   # UVDoc 推理包装
+│   ├── __init__.py              # 包入口
+│   ├── page_loader.py           # MedicalPageLoader (图片预处理)
+│   ├── layout_detector.py       # MedicalLayoutDetector (布局后处理)
+│   ├── result_formatter.py      # MedicalResultFormatter (结果后处理)
+│   ├── pipeline.py              # MedicalOcrPipeline (继承自 glmocr.Pipeline)
+│   └── uvdoc_inference.py       # UVDoc 推理包装
 ├── examples/
-│   └── basic_usage.py       # 使用示例
+│   └── basic_usage.py           # 使用示例
 ├── tests/
 ├── pyproject.toml
 └── README.md
