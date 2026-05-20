@@ -1,119 +1,121 @@
 # Medical OCR
 
-专业的医疗文档 OCR 处理库，基于 glmocr 构建，增加了医疗文档特定的优化功能。
+专业的医疗文档 OCR 预处理和处理库，基于 glmocr 构建。
 
-## 功能特性
+## 核心功能
 
-### 医疗文档优化
+### MedicalPageLoader - 核心预处理引擎
 
-- **医疗图像增强**: 针对医疗文档（病历、化验单、X光片等）的专用图像预处理
-- **布局检测优化**: 优先检测医疗相关的区域（表格、签名、印章等）
-- **医学术语标准化**: 自动标准化医学术语和单位表示
-- **OCR 结果清理**: 专门解决医疗文档中常见的 OCR 错误
+`MedicalPageLoader` 是本项目的核心类，继承自 glmocr 的 `PageLoader`，增加了三阶段文档预处理：
 
-### 技术特点
+#### 1. YOLO 文档检测
+- 使用 YOLO 模型检测文档区域
+- 自动裁剪文档边界
+- 支持自定义检测阈值
 
-- 完全继承自 glmocr，保持 API 兼容性
-- 不修改 glmocr 源码，通过继承方式扩展
-- 支持自定义预处理和后处理钩子
-- Flask 服务器提供 REST API 接口
+#### 2. RapidOCR 方向检测
+- 检测文档倾斜角度
+- 自动旋转矫正
+- 支持 90°/180°/270° 旋转
 
-## 安装
+#### 3. UVDoc 扭曲矫正
+- 矫正文档透视畸变
+- 恢复文档平整度
+- 提供基础的透视矫正备选方案
+
+## 快速开始
+
+### 安装依赖
 
 ```bash
-# 基础安装
-pip install -e .
-
-# 安装服务器功能
-pip install -e ".[server]"
-
-# 开发安装
-pip install -e ".[dev]"
+pip install glmocr opencv-python numpy Pillow
+pip install ultralytics   # YOLO 模型支持
+pip install rapidocr_onnxruntime  # RapidOCR 支持
 ```
 
-## 快速使用
-
-### 作为库使用
+### 基本使用
 
 ```python
-from glmocr.config import load_config
-from medical_ocr.pipeline import MedicalOcrPipeline
-from medical_ocr.layout_detector import MedicalLayoutDetector
+from medical_ocr import MedicalPageLoader
+from glmocr.config import PageLoaderConfig
 
-# 加载配置
-config = load_config()
+# 创建配置
+config = PageLoaderConfig()
 
-# 创建医疗专用布局检测器
-layout_detector = MedicalLayoutDetector(config.pipeline.layout)
-
-# 创建医疗 OCR pipeline
-pipeline = MedicalOcrPipeline(
-    config=config.pipeline,
-    layout_detector=layout_detector
+# 创建 MedicalPageLoader
+page_loader = MedicalPageLoader(
+    config=config,
+    yolo_model_dir="/path/to/yolo/model",
+    uvdoc_model_dir="/path/to/uvdoc/model",
+    enable_preprocessing=True
 )
 
-# 添加自定义预处理钩子
-def my_custom_preprocess(image, context):
-    # 自定义图像处理逻辑
-    return image
+# 初始化模型
+page_loader.start()
 
-pipeline.add_preprocess_hook(my_custom_preprocess)
+# 加载并预处理图片
+pages = page_loader.load_pages(["medical_document.jpg"])
 
-# 处理文档
-pipeline.start()
-results = list(pipeline.process(request_data))
-for result in results:
-    print(result.json_result)
-pipeline.stop()
+# 预处理单张图片
+from PIL import Image
+image = Image.open("medical_doc.jpg")
+processed = page_loader.preprocess_image(image)
+
+# 停止
+page_loader.stop()
 ```
 
-### 启动服务器
+### 预处理流程
 
-```bash
-# 使用命令行启动
-medical-ocr-server --host 0.0.0.0 --port 8080
-
-# 或者直接运行模块
-python -m medical_ocr.server
+```
+输入图片
+  ↓
+1. detect_document()      [YOLO 检测]
+  ↓
+2. crop_document()         [裁剪文档]
+  ↓
+3. correct_orientation()   [RapidOCR 方向矫正]
+  ↓
+4. correct_distortion()    [UVDoc 扭曲矫正]
+  ↓
+输出预处理后的图片
 ```
 
-### API 调用
+## API 参考
 
-#### 健康检查
+### MedicalPageLoader
 
-```bash
-curl http://localhost:8080/health
-```
+#### 初始化参数
 
-#### 基础 OCR
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| config | PageLoaderConfig | glmocr 配置对象 |
+| yolo_model_dir | str | YOLO 模型目录路径 |
+| uvdoc_model_dir | str | UVDoc 模型目录路径 |
+| enable_preprocessing | bool | 是否启用预处理（默认 True） |
 
-```bash
-curl -X POST http://localhost:8080/medical-ocr/parse \
-  -H "Content-Type: application/json" \
-  -d '{
-    "images": ["path/to/medical/document.jpg"],
-    "preprocess_options": {
-      "enable_enhancement": true
-    },
-    "postprocess_options": {
-      "normalize_terminology": true
-    }
-  }'
-```
+#### 主要方法
 
-#### 增强 OCR
+| 方法 | 说明 |
+|------|------|
+| `start()` | 初始化所有预处理模型 |
+| `stop()` | 释放模型资源 |
+| `load_pages(sources)` | 加载并预处理页面 |
+| `preprocess_image(image)` | 预处理单张图片 |
+| `detect_document(image)` | YOLO 文档检测 |
+| `correct_orientation(image)` | RapidOCR 方向矫正 |
+| `correct_distortion(image)` | UVDoc 扭曲矫正 |
 
-```bash
-curl -X POST http://localhost:8080/medical-ocr/parse/enhanced \
-  -H "Content-Type: application/json" \
-  -d '{
-    "images": ["path/to/medical/document.jpg"],
-    "medical_enhancements": {
-      "enable_enhancement": true,
-      "normalize_units": true,
-      "extract_patient_info": true
-    }
-  }'
+#### 配置选项
+
+```python
+# YOLO 检测配置
+page_loader.yolo_confidence_threshold = 0.5  # 置信度阈值
+page_loader.yolo_nms_threshold = 0.45      # NMS 阈值
+page_loader.document_padding = 10            # 裁剪边距（像素）
+
+# 预处理控制
+page_loader.enable_preprocessing = True      # 启用/禁用预处理
 ```
 
 ## 项目结构
@@ -121,78 +123,31 @@ curl -X POST http://localhost:8080/medical-ocr/parse/enhanced \
 ```
 medical_ocr/
 ├── medical_ocr/
-│   ├── __init__.py          # 包入口
-│   ├── pipeline.py          # MedicalOcrPipeline
-│   ├── layout_detector.py   # MedicalLayoutDetector
-│   └── server.py            # Flask 服务器
-├── examples/                # 示例代码
-├── tests/                   # 测试代码
-├── pyproject.toml           # 项目配置
-└── README.md               # 说明文档
+│   ├── __init__.py              # 包入口
+│   ├── page_loader.py           # MedicalPageLoader 核心类
+│   ├── pipeline.py              # 处理流程编排
+│   ├── layout_detector.py       # 布局检测器
+│   ├── uvdoc_inference.py       # UVDoc 推理参考实现
+│   └── server.py                # Flask 服务器
+├── examples/
+│   └── basic_usage.py           # 使用示例
+├── tests/
+├── pyproject.toml
+└── README.md
 ```
 
-## 核心类
+## 模型要求
 
-### MedicalLayoutDetector
+### YOLO 模型
+- 模型文件：`best.pt`
+- 支持的任务：文档检测（单类或多类）
+- 推荐框架：ultralytics YOLOv8/v5
 
-继承自 `PPDocLayoutDetector`，增加了医疗文档特定的功能：
+### UVDoc 模型
+- 支持格式：.pt, .onnx
+- 功能：文档透视矫正
+- 参考实现：`uvdoc_inference.py`
 
-- `_enhance_medical_image()`: 医疗图像增强（去噪、对比度增强）
-- `_filter_medical_regions()`: 医疗区域过滤和优先级排序
-- `_smooth_polygons()`: 多边形平滑处理
-
-### MedicalOcrPipeline
-
-继承自 `Pipeline`，增加了：
-
-- 预处理钩子系统
-- 后处理钩子系统
-- 医学术语标准化
-- 医疗文本清理
-
-## 自定义扩展
-
-### 添加自定义预处理
-
-```python
-def my_preprocessing(image, context):
-    # 图像处理逻辑
-    return processed_image
-
-pipeline.add_preprocess_hook(my_preprocessing)
-```
-
-### 添加自定义后处理
-
-```python
-def my_postprocessing(json_result, markdown_result, context):
-    # 结果处理逻辑
-    return enhanced_json, enhanced_markdown
-
-pipeline.add_postprocess_hook(my_postprocessing)
-```
-
-## 配置选项
-
-可以通过 config 对象设置以下选项：
-
-```python
-# MedicalLayoutDetector 配置
-config.pipeline.layout.enable_medical_enhancement = True
-config.pipeline.layout.min_medical_region_area = 300
-config.pipeline.layout.max_overlap_ratio = 0.85
-```
-
-## 开发
-
-```bash
-# 安装开发依赖
-pip install -e ".[dev]"
-
-# 运行测试
-pytest
-```
-
-## 许可证
+## 许可
 
 Apache-2.0

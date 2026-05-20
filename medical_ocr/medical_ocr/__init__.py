@@ -4,6 +4,13 @@ __version__ = "0.1.0"
 
 # 延迟导入以避免依赖问题
 try:
+    from .page_loader import MedicalPageLoader
+except Exception as e:
+    import warnings
+    warnings.warn(f"Could not import MedicalPageLoader: {e}")
+    MedicalPageLoader = None
+
+try:
     from .pipeline import MedicalOcrPipeline
 except Exception as e:
     import warnings
@@ -17,4 +24,4 @@ except Exception as e:
     warnings.warn(f"Could not import MedicalLayoutDetector: {e}")
     MedicalLayoutDetector = None
 
-__all__ = ["MedicalOcrPipeline", "MedicalLayoutDetector"]
+__all__ = ["MedicalPageLoader", "MedicalOcrPipeline", "MedicalLayoutDetector"]
