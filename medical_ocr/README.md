@@ -36,14 +36,13 @@ from glmocr.config import load_config
 # 加载配置
 config = load_config()
 
-# 创建医疗专用 Pipeline（唯一的不同之处！）
+# 创建医疗专用 Pipeline
 pipeline = MedicalOcrPipeline(
     config=config.pipeline,
     yolo_model_dir="/path/to/yolo/model",  # 可选
     uvdoc_model_dir="/path/to/uvdoc/model",  # 可选
 )
 
-# 以下代码与原始 Pipeline 完全相同！
 pipeline.start()
 
 for result in pipeline.process(request_data):
@@ -55,7 +54,7 @@ pipeline.stop()
 
 ### 预处理流程
 
-MedicalPageLoader 自动在加载图片时执行三阶段预处理：
+#### MedicalPageLoader (图片预处理)
 
 ```
 输入图片
@@ -69,6 +68,18 @@ MedicalPageLoader 自动在加载图片时执行三阶段预处理：
 预处理后图片 → 交给 LayoutDetector 和 OCR
 ```
 
+#### MedicalLayoutDetector (布局检测后处理)
+
+```
+原始检测结果
+    ↓
+1. 过滤：只保留 label 为 "table" 的区域
+    ↓
+2. 添加：整个图片作为一个 "text" 区域
+    ↓
+最终布局结果
+```
+
 ## 核心类说明
 
 ### MedicalPageLoader
@@ -80,11 +91,17 @@ MedicalPageLoader 自动在加载图片时执行三阶段预处理：
 - `preprocess_image(image)` - 完整预处理流程
 
 ### MedicalLayoutDetector
-继承自 `glmocr.layout.PPDocLayoutDetector`，增加医疗特定优化：
+继承自 `glmocr.layout.PPDocLayoutDetector`，只重写 process 方法：
 
-- 医疗图像增强
-- 医疗区域检测优化
-- 多边形平滑
+```
+输入: 父类检测的所有区域
+    ↓
+保留: label 为 "table" 的区域
+    ↓
+添加: 整个图片区域，label="text"
+    ↓
+输出: 过滤后的区域列表
+```
 
 ### MedicalOcrPipeline
 继承自 `glmocr.pipeline.Pipeline`：
@@ -98,8 +115,8 @@ MedicalPageLoader 自动在加载图片时执行三阶段预处理：
 medical_ocr/
 ├── medical_ocr/
 │   ├── __init__.py          # 包入口
-│   ├── page_loader.py       # MedicalPageLoader (⭐ 核心)
-│   ├── layout_detector.py   # MedicalLayoutDetector
+│   ├── page_loader.py       # MedicalPageLoader (图片预处理)
+│   ├── layout_detector.py   # MedicalLayoutDetector (布局后处理)
 │   ├── pipeline.py          # MedicalOcrPipeline (继承自 glmocr.Pipeline)
 │   └── uvdoc_inference.py   # UVDoc 推理包装
 ├── examples/
