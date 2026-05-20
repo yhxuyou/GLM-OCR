@@ -1,153 +1,144 @@
 # Medical OCR
 
-专业的医疗文档 OCR 预处理和处理库，基于 glmocr 构建。
+专业的医疗文档 OCR 处理库，基于 glmocr 构建，保持原有的 Pipeline 推理逻辑不变，只替换了关键组件。
 
-## 核心功能
+## 核心特点
 
-### MedicalPageLoader - 核心预处理引擎
-
-`MedicalPageLoader` 是本项目的核心类，继承自 glmocr 的 `PageLoader`，增加了三阶段文档预处理：
-
-#### 1. YOLO 文档检测
-- 使用 YOLO 模型检测文档区域
-- 自动裁剪文档边界
-- 支持自定义检测阈值
-
-#### 2. RapidOCR 方向检测
-- 检测文档倾斜角度
-- 自动旋转矫正
-- 支持 90°/180°/270° 旋转
-
-#### 3. UVDoc 扭曲矫正
-- 矫正文档透视畸变
-- 恢复文档平整度
-- 提供基础的透视矫正备选方案
+✅ **不改变原有逻辑** - MedicalOcrPipeline 继承自 glmocr.Pipeline，所有 process() 方法完全继承  
+✅ **替换关键组件** - 使用 MedicalPageLoader 和 MedicalLayoutDetector  
+✅ **三阶段预处理** - YOLO 检测 -> 方向矫正 -> 畸变矫正  
+✅ **可无缝替换** - 现有代码只需要替换 Pipeline 类即可
 
 ## 快速开始
 
 ### 安装依赖
 
 ```bash
-pip install glmocr opencv-python numpy Pillow
-pip install ultralytics   # YOLO 模型支持
-pip install rapidocr_onnxruntime  # RapidOCR 支持
+pip install -e .
+```
+
+可选依赖（用于预处理）:
+
+```bash
+pip install ultralytics  # YOLO 文档检测
+pip install rapidocr_onnxruntime  # 方向检测
+pip install opencv-python
 ```
 
 ### 基本使用
 
+与原始 glmocr.Pipeline 用法完全一致：
+
 ```python
-from medical_ocr import MedicalPageLoader
-from glmocr.config import PageLoaderConfig
+from medical_ocr import MedicalOcrPipeline
+from glmocr.config import load_config
 
-# 创建配置
-config = PageLoaderConfig()
+# 加载配置
+config = load_config()
 
-# 创建 MedicalPageLoader
-page_loader = MedicalPageLoader(
-    config=config,
-    yolo_model_dir="/path/to/yolo/model",
-    uvdoc_model_dir="/path/to/uvdoc/model",
-    enable_preprocessing=True
+# 创建医疗专用 Pipeline（唯一的不同之处！）
+pipeline = MedicalOcrPipeline(
+    config=config.pipeline,
+    yolo_model_dir="/path/to/yolo/model",  # 可选
+    uvdoc_model_dir="/path/to/uvdoc/model",  # 可选
 )
 
-# 初始化模型
-page_loader.start()
+# 以下代码与原始 Pipeline 完全相同！
+pipeline.start()
 
-# 加载并预处理图片
-pages = page_loader.load_pages(["medical_document.jpg"])
+for result in pipeline.process(request_data):
+    print(result.json_result)
+    print(result.markdown_result)
 
-# 预处理单张图片
-from PIL import Image
-image = Image.open("medical_doc.jpg")
-processed = page_loader.preprocess_image(image)
-
-# 停止
-page_loader.stop()
+pipeline.stop()
 ```
 
 ### 预处理流程
 
+MedicalPageLoader 自动在加载图片时执行三阶段预处理：
+
 ```
 输入图片
-  ↓
-1. detect_document()      [YOLO 检测]
-  ↓
-2. crop_document()         [裁剪文档]
-  ↓
-3. correct_orientation()   [RapidOCR 方向矫正]
-  ↓
-4. correct_distortion()    [UVDoc 扭曲矫正]
-  ↓
-输出预处理后的图片
+    ↓
+1. YOLO 文档检测 → 定位并裁剪文档区域
+    ↓
+2. RapidOCR 方向检测 → 旋转至正确角度
+    ↓
+3. UVDoc 畸变矫正 → 平坦化透视变形
+    ↓
+预处理后图片 → 交给 LayoutDetector 和 OCR
 ```
 
-## API 参考
+## 核心类说明
 
 ### MedicalPageLoader
+继承自 `glmocr.dataloader.PageLoader`，增加预处理功能：
 
-#### 初始化参数
+- `detect_document(image)` - YOLO 文档检测
+- `correct_orientation(image)` - RapidOCR 方向矫正
+- `correct_distortion(image)` - UVDoc 畸变矫正
+- `preprocess_image(image)` - 完整预处理流程
 
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| config | PageLoaderConfig | glmocr 配置对象 |
-| yolo_model_dir | str | YOLO 模型目录路径 |
-| uvdoc_model_dir | str | UVDoc 模型目录路径 |
-| enable_preprocessing | bool | 是否启用预处理（默认 True） |
+### MedicalLayoutDetector
+继承自 `glmocr.layout.PPDocLayoutDetector`，增加医疗特定优化：
 
-#### 主要方法
+- 医疗图像增强
+- 医疗区域检测优化
+- 多边形平滑
 
-| 方法 | 说明 |
-|------|------|
-| `start()` | 初始化所有预处理模型 |
-| `stop()` | 释放模型资源 |
-| `load_pages(sources)` | 加载并预处理页面 |
-| `preprocess_image(image)` | 预处理单张图片 |
-| `detect_document(image)` | YOLO 文档检测 |
-| `correct_orientation(image)` | RapidOCR 方向矫正 |
-| `correct_distortion(image)` | UVDoc 扭曲矫正 |
+### MedicalOcrPipeline
+继承自 `glmocr.pipeline.Pipeline`：
 
-#### 配置选项
-
-```python
-# YOLO 检测配置
-page_loader.yolo_confidence_threshold = 0.5  # 置信度阈值
-page_loader.yolo_nms_threshold = 0.45      # NMS 阈值
-page_loader.document_padding = 10            # 裁剪边距（像素）
-
-# 预处理控制
-page_loader.enable_preprocessing = True      # 启用/禁用预处理
-```
+- **__init__ 唯一修改** - 替换 PageLoader 和 LayoutDetector
+- **其他方法** - 完全继承自父类，无需修改
 
 ## 项目结构
 
 ```
 medical_ocr/
 ├── medical_ocr/
-│   ├── __init__.py              # 包入口
-│   ├── page_loader.py           # MedicalPageLoader 核心类
-│   ├── pipeline.py              # 处理流程编排
-│   ├── layout_detector.py       # 布局检测器
-│   ├── uvdoc_inference.py       # UVDoc 推理参考实现
-│   └── server.py                # Flask 服务器
+│   ├── __init__.py          # 包入口
+│   ├── page_loader.py       # MedicalPageLoader (⭐ 核心)
+│   ├── layout_detector.py   # MedicalLayoutDetector
+│   ├── pipeline.py          # MedicalOcrPipeline (继承自 glmocr.Pipeline)
+│   └── uvdoc_inference.py   # UVDoc 推理包装
 ├── examples/
-│   └── basic_usage.py           # 使用示例
+│   └── basic_usage.py       # 使用示例
 ├── tests/
 ├── pyproject.toml
 └── README.md
 ```
 
-## 模型要求
+## 迁移指南
 
-### YOLO 模型
-- 模型文件：`best.pt`
-- 支持的任务：文档检测（单类或多类）
-- 推荐框架：ultralytics YOLOv8/v5
+从 glmocr 迁移到 medical-ocr，只需要：
 
-### UVDoc 模型
-- 支持格式：.pt, .onnx
-- 功能：文档透视矫正
-- 参考实现：`uvdoc_inference.py`
+### 原代码 (glmocr)
+```python
+from glmocr.pipeline import Pipeline
 
-## 许可
+config = load_config()
+pipeline = Pipeline(config.pipeline)
+pipeline.start()
+# ... 使用 ...
+pipeline.stop()
+```
+
+### 新代码 (medical-ocr)
+```python
+from medical_ocr import MedicalOcrPipeline  # 只需要改这个
+
+config = load_config()
+pipeline = MedicalOcrPipeline(  # 只需要改这个
+    config=config.pipeline,
+    yolo_model_dir="/path/to/yolo",  # 可选
+    uvdoc_model_dir="/path/to/uvdoc",  # 可选
+)
+pipeline.start()
+# ... 使用完全相同！ ...
+pipeline.stop()
+```
+
+## 许可证
 
 Apache-2.0

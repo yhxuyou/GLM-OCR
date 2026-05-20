@@ -10,8 +10,8 @@ Inherits from glmocr's PageLoader and adds preprocessing capabilities.
 
 from typing import List, Dict, Any, Optional, Tuple, Union
 from PIL import Image
-import numpy as np
 import cv2
+import numpy as np
 
 from glmocr.dataloader import PageLoader
 from glmocr.utils.logging import get_logger
@@ -29,6 +29,12 @@ class MedicalPageLoader(PageLoader):
 
     Inherits all loading capabilities from PageLoader.
     """
+
+    # Medical document specific region labels to prioritize
+    MEDICAL_LABELS = {
+        "table", "chart", "diagram", "signature",
+        "stamp", "header", "footer", "medical_record"
+    }
 
     def __init__(
         self,
@@ -51,7 +57,7 @@ class MedicalPageLoader(PageLoader):
         self.yolo_model_dir = yolo_model_dir
         self.uvdoc_model_dir = uvdoc_model_dir
 
-        # Model instances
+        # Model instances (lazy initialization)
         self._yolo_model = None
         self._uvdoc_model = None
         self._rapidocr_detector = None
@@ -60,42 +66,31 @@ class MedicalPageLoader(PageLoader):
         self.yolo_confidence_threshold = 0.5
         self.yolo_nms_threshold = 0.45
         self.document_padding = 10  # pixels
+        self._models_initialized = False
 
     # =========================================================================
     # Model Initialization
     # =========================================================================
 
-    def start(self):
-        """Initialize all preprocessing models."""
-        logger.info("Initializing MedicalPageLoader models...")
+    def _init_models(self):
+        """Initialize all models (lazy initialization)."""
+        if self._models_initialized:
+            return
 
         self._init_yolo_model()
         self._init_rapidocr()
         self._init_uvdoc_model()
-
+        self._models_initialized = True
         logger.info("MedicalPageLoader models initialized successfully")
-
-    def stop(self):
-        """Release model resources."""
-        if self._yolo_model is not None:
-            del self._yolo_model
-            self._yolo_model = None
-
-        if self._uvdoc_model is not None:
-            del self._uvdoc_model
-            self._uvdoc_model = None
-
-        self._rapidocr_detector = None
-        logger.info("MedicalPageLoader models stopped")
 
     def _init_yolo_model(self):
         """Initialize YOLO document detection model."""
         if not self.yolo_model_dir:
-            logger.warning("YOLO model directory not provided, skipping YOLO initialization")
+            logger.info("YOLO model directory not provided, skipping")
             return
 
         try:
-            # 尝试导入 ultralytics YOLO
+            # Try to import ultralytics YOLO
             from ultralytics import YOLO
             self._yolo_model = YOLO(f"{self.yolo_model_dir}/best.pt")
             logger.info(f"YOLO model loaded from {self.yolo_model_dir}")
@@ -121,30 +116,15 @@ class MedicalPageLoader(PageLoader):
     def _init_uvdoc_model(self):
         """Initialize UVDoc distortion correction model."""
         if not self.uvdoc_model_dir:
-            logger.warning("UVDoc model directory not provided, skipping initialization")
+            logger.info("UVDoc model directory not provided, skipping")
             return
 
         try:
-            # 尝试导入 UVDoc
-            # UVDoc 通常使用以下方式加载
-            import sys
-            sys.path.insert(0, self.uvdoc_model_dir)
-            
-            # 这里的导入方式可能需要根据实际的 UVDoc 库进行调整
-            # 通常 UVDoc 会有一个核心的推理类
-            try:
-                from UVDoc import UVDocModel
-                self._uvdoc_model = UVDocModel(self.uvdoc_model_dir)
-                logger.info(f"UVDoc model loaded from {self.uvdoc_model_dir}")
-            except ImportError:
-                # 如果上面的方式失败，尝试直接导入
-                from .uvdoc_inference import UVDocInference
-                self._uvdoc_model = UVDocInference(self.uvdoc_model_dir)
-                logger.info(f"UVDoc model loaded (alternative method)")
-
-        except ImportError:
-            logger.warning("UVDoc not installed or not found, distortion correction disabled")
-            self._uvdoc_model = None
+            # Try to import UVDoc
+            # Create simple wrapper if UVDoc not available
+            from .uvdoc_inference import UVDocInference
+            self._uvdoc_model = UVDocInference(self.uvdoc_model_dir)
+            logger.info(f"UVDoc model loaded from {self.uvdoc_model_dir}")
         except Exception as e:
             logger.error(f"Failed to load UVDoc model: {e}")
             self._uvdoc_model = None
@@ -162,13 +142,15 @@ class MedicalPageLoader(PageLoader):
         Returns:
             List of bounding boxes [[x1, y1, x2, y2], ...] or None if no detection
         """
+        self._init_models()
+
         if self._yolo_model is None:
             return None
 
         try:
             # Convert PIL to numpy array
             img_np = np.array(image.convert("RGB"))
-            
+
             # Run YOLO inference
             results = self._yolo_model(
                 img_np,
@@ -205,7 +187,7 @@ class MedicalPageLoader(PageLoader):
         h, w = img_np.shape[:2]
 
         x1, y1, x2, y2 = bbox
-        
+
         # Add padding
         x1 = max(0, x1 - self.document_padding)
         y1 = max(0, y1 - self.document_padding)
@@ -228,6 +210,8 @@ class MedicalPageLoader(PageLoader):
         Returns:
             Orientation-corrected PIL Image
         """
+        self._init_models()
+
         if self._rapidocr_detector is None:
             return image
 
@@ -273,13 +257,13 @@ class MedicalPageLoader(PageLoader):
                 center = (w / 2, h / 2)
                 rotation_matrix = cv2.getRotationMatrix2D(center, rotation_angle, 1.0)
                 rotated = cv2.warpAffine(
-                    img_np, 
-                    rotation_matrix, 
+                    img_np,
+                    rotation_matrix,
                     (w, h),
                     borderMode=cv2.BORDER_CONSTANT,
                     borderValue=(255, 255, 255)
                 )
-                
+
                 logger.info(f"Rotated image by {rotation_angle:.1f} degrees")
                 return Image.fromarray(rotated)
 
@@ -288,37 +272,6 @@ class MedicalPageLoader(PageLoader):
         except Exception as e:
             logger.warning(f"Orientation correction failed: {e}")
             return image
-
-    def detect_orientation_angle(self, image: Image.Image) -> float:
-        """Detect document orientation angle without correction.
-
-        Args:
-            image: PIL Image
-
-        Returns:
-            Detected angle in degrees
-        """
-        if self._rapidocr_detector is None:
-            return 0.0
-
-        try:
-            img_np = np.array(image.convert("RGB"))
-            results, _, _ = self._rapidocr_detector(img_np)
-
-            if results is None or len(results) == 0:
-                return 0.0
-
-            angles = []
-            for box in results:
-                p1, p2 = box[0], box[1]
-                angle = np.arctan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / np.pi
-                angles.append(angle)
-
-            return float(np.median(angles))
-
-        except Exception as e:
-            logger.warning(f"Angle detection failed: {e}")
-            return 0.0
 
     # =========================================================================
     # Distortion Correction (UVDoc)
@@ -333,15 +286,17 @@ class MedicalPageLoader(PageLoader):
         Returns:
             Distortion-corrected PIL Image
         """
+        self._init_models()
+
         if self._uvdoc_model is None:
             return image
 
         try:
             img_np = np.array(image.convert("RGB"))
-            
+
             # UVDoc inference
             corrected_np = self._uvdoc_model.process(img_np)
-            
+
             logger.info("UVDoc distortion correction applied")
             return Image.fromarray(corrected_np)
 
@@ -393,41 +348,14 @@ class MedicalPageLoader(PageLoader):
         logger.debug(f"Preprocessing complete. Final size: {processed.size}")
         return processed
 
-    def preprocess_pages(
-        self, sources: Union[str, bytes, List[Union[str, bytes]]]
-    ) -> List[Image.Image]:
-        """Load and preprocess pages.
-
-        Args:
-            sources: Image sources (path, URL, bytes, or list)
-
-        Returns:
-            List of preprocessed PIL Images
-        """
-        # Load pages using parent class method
-        pages = self.load_pages(sources)
-
-        # Apply preprocessing to each page
-        if self.enable_preprocessing:
-            processed_pages = []
-            for i, page in enumerate(pages):
-                logger.info(f"Preprocessing page {i+1}/{len(pages)}")
-                processed = self.preprocess_image(page)
-                processed_pages.append(processed)
-            return processed_pages
-
-        return pages
-
     # =========================================================================
-    # Override parent methods
+    # Override parent methods to add preprocessing
     # =========================================================================
 
     def load_pages(
         self, sources: Union[str, bytes, List[Union[str, bytes]]]
     ) -> List[Image.Image]:
         """Load sources with optional preprocessing.
-
-        If preprocessing is enabled, applies the full preprocessing pipeline.
 
         Args:
             sources: Image sources
