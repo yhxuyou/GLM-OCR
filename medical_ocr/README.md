@@ -7,7 +7,7 @@
 ✅ **不改变原有逻辑** - MedicalOcrPipeline 继承自 glmocr.Pipeline，所有 process() 方法完全继承  
 ✅ **替换关键组件** - 使用 MedicalPageLoader、MedicalLayoutDetector 和 MedicalResultFormatter  
 ✅ **三阶段预处理** - YOLO 检测 -> 方向矫正 -> 畸变矫正  
-✅ **医疗专用后处理** - 医学术语标准化、医疗单位统一  
+✅ **RapidOCR 坐标匹配** - 使用 RapidOCR 获取文字坐标并与 OCR 结果匹配  
 ✅ **可无缝替换** - 现有代码只需要替换 Pipeline 类即可
 
 ## 快速开始
@@ -16,13 +16,8 @@
 
 ```bash
 pip install -e .
-```
-
-可选依赖（用于预处理）:
-
-```bash
-pip install ultralytics  # YOLO 文档检测
-pip install rapidocr_onnxruntime  # 方向检测
+pip install rapidocr_onnxruntime  # 用于坐标检测
+pip install ultralytics  # YOLO 文档检测 (可选)
 pip install opencv-python
 ```
 
@@ -34,10 +29,8 @@ pip install opencv-python
 from medical_ocr import MedicalOcrPipeline
 from glmocr.config import load_config
 
-# 加载配置
 config = load_config()
 
-# 创建医疗专用 Pipeline
 pipeline = MedicalOcrPipeline(
     config=config.pipeline,
     yolo_model_dir="/path/to/yolo/model",  # 可选
@@ -53,50 +46,6 @@ for result in pipeline.process(request_data):
 pipeline.stop()
 ```
 
-### 处理流程
-
-#### MedicalPageLoader (图片预处理)
-
-```
-输入图片
-    ↓
-1. YOLO 文档检测 → 定位并裁剪文档区域
-    ↓
-2. RapidOCR 方向检测 → 旋转至正确角度
-    ↓
-3. UVDoc 畸变矫正 → 平坦化透视变形
-    ↓
-预处理后图片 → 交给 LayoutDetector 和 OCR
-```
-
-#### MedicalLayoutDetector (布局检测后处理)
-
-```
-原始检测结果
-    ↓
-1. 过滤：只保留 label 为 "table" 的区域
-    ↓
-2. 添加：整个图片作为一个 "text" 区域
-    ↓
-最终布局结果
-```
-
-#### MedicalResultFormatter (结果后处理)
-
-```
-OCR识别结果
-    ↓
-1. 医学术语标准化 → BP → Blood Pressure
-    ↓
-2. 医疗单位统一 → 120/80 → 120/80 mmHg
-    ↓
-3. OCR 错误修正 → l → 1, O → 0
-    ↓
-4. 医学术语强调 → **Blood Pressure**
-    ↓
-最终格式化结果
-```
-
 ## 核心类说明
 
 ### MedicalPageLoader
@@ -105,28 +54,41 @@ OCR识别结果
 - `detect_document(image)` - YOLO 文档检测
 - `correct_orientation(image)` - RapidOCR 方向矫正
 - `correct_distortion(image)` - UVDoc 畸变矫正
-- `preprocess_image(image)` - 完整预处理流程
 
 ### MedicalLayoutDetector
-继承自 `glmocr.layout.PPDocLayoutDetector`，只重写 process 方法：
+继承自 `glmocr.layout.PPDocLayoutDetector`：
 
 ```
-输入: 父类检测的所有区域
-    ↓
-保留: label 为 "table" 的区域
-    ↓
-添加: 整个图片区域，label="text"
-    ↓
-输出: 过滤后的区域列表
+原始检测结果 → 过滤保留 "table" → 添加全图 "text"
 ```
 
 ### MedicalResultFormatter
-继承自 `glmocr.postprocess.ResultFormatter`，增加医疗专用后处理：
+继承自 `glmocr.postprocess.ResultFormatter`：
 
-- 医学术语标准化（BP → Blood Pressure）
-- 医疗单位统一（血压、体温等）
-- OCR 错误修正（字母与数字混淆）
-- 医学术语强调（Markdown 加粗）
+**核心功能：RapidOCR 坐标匹配**
+
+```
+OCR 文本内容
+    ↓
+RapidOCR 文字检测（获取坐标）
+    ↓
+坐标与文字匹配
+    ↓
+输出带坐标的 JSON 结果
+```
+
+#### 输出格式示例
+
+```json
+{
+  "index": 0,
+  "label": "text",
+  "content": "Patient Name: John Doe",
+  "score": 0.95,
+  "bbox_2d": [100, 50, 400, 80],
+  "polygon": [[100, 50], [400, 50], [400, 80], [100, 80]]
+}
+```
 
 ### MedicalOcrPipeline
 继承自 `glmocr.pipeline.Pipeline`：
@@ -141,8 +103,8 @@ medical_ocr/
 ├── medical_ocr/
 │   ├── __init__.py              # 包入口
 │   ├── page_loader.py           # MedicalPageLoader (图片预处理)
-│   ├── layout_detector.py       # MedicalLayoutDetector (布局后处理)
-│   ├── result_formatter.py      # MedicalResultFormatter (结果后处理)
+│   ├── layout_detector.py       # MedicalLayoutDetector (布局过滤)
+│   ├── result_formatter.py      # MedicalResultFormatter (坐标匹配)
 │   ├── pipeline.py              # MedicalOcrPipeline (继承自 glmocr.Pipeline)
 │   └── uvdoc_inference.py       # UVDoc 推理包装
 ├── examples/
@@ -154,8 +116,6 @@ medical_ocr/
 
 ## 迁移指南
 
-从 glmocr 迁移到 medical-ocr，只需要：
-
 ### 原代码 (glmocr)
 ```python
 from glmocr.pipeline import Pipeline
@@ -163,22 +123,24 @@ from glmocr.pipeline import Pipeline
 config = load_config()
 pipeline = Pipeline(config.pipeline)
 pipeline.start()
-# ... 使用 ...
+for result in pipeline.process(request_data):
+    print(result.json_result)
 pipeline.stop()
 ```
 
 ### 新代码 (medical-ocr)
 ```python
-from medical_ocr import MedicalOcrPipeline  # 只需要改这个
+from medical_ocr import MedicalOcrPipeline  # 只需改这一行
 
 config = load_config()
-pipeline = MedicalOcrPipeline(  # 只需要改这个
+pipeline = MedicalOcrPipeline(
     config=config.pipeline,
     yolo_model_dir="/path/to/yolo",  # 可选
     uvdoc_model_dir="/path/to/uvdoc",  # 可选
 )
 pipeline.start()
-# ... 使用完全相同！ ...
+for result in pipeline.process(request_data):
+    print(result.json_result)  # JSON 现在包含坐标信息！
 pipeline.stop()
 ```
 

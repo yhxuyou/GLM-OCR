@@ -1,12 +1,11 @@
 """Medical Result Formatter - Specialized post-processing for medical documents.
 
-Inherits from glmocr's ResultFormatter and adds medical-specific post-processing.
+Inherits from glmocr's ResultFormatter and adds RapidOCR-based coordinate matching.
 """
 
 import json
 import re
-from copy import deepcopy
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, Optional
 
 from glmocr.postprocess import ResultFormatter
 from glmocr.utils.logging import get_logger
@@ -15,159 +14,196 @@ logger = get_logger(__name__)
 
 
 class MedicalResultFormatter(ResultFormatter):
-    """Medical-specific result formatter.
+    """Medical-specific result formatter with RapidOCR coordinate matching.
 
-    Adds medical document specific post-processing:
-    - Medical terminology normalization
-    - Medical unit standardization
-    - Clean up common medical OCR artifacts
+    Features:
+    - Initialize RapidOCR model for text detection
+    - Match OCR results with detected text coordinates
+    - Output structured results with coordinates
     """
 
     def __init__(self, config):
         super().__init__(config)
         
-        # Medical-specific configuration
-        self.enable_medical_normalization = getattr(
-            config, "enable_medical_normalization", True
-        )
-        self.enable_unit_conversion = getattr(
-            config, "enable_unit_conversion", True
-        )
+        # RapidOCR model instances
+        self._rapidocr_detector = None
+        self._rapidocr_recognizer = None
+        self._rapidocr_reader = None
+        
+        # Initialize RapidOCR models
+        self._init_rapidocr()
 
-    # =========================================================================
-    # Medical-specific post-processing
-    # =========================================================================
+    def _init_rapidocr(self):
+        """Initialize RapidOCR models for text detection and recognition."""
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+            self._rapidocr_reader = RapidOCR()
+            logger.info("RapidOCR initialized successfully for coordinate detection")
+        except ImportError:
+            logger.warning("rapidocr_onnxruntime not installed, coordinate matching disabled")
+        except Exception as e:
+            logger.error(f"Failed to initialize RapidOCR: {e}")
 
-    def _normalize_medical_terminology(self, content: str) -> str:
-        """Normalize medical terminology in content."""
-        if not self.enable_medical_normalization:
-            return content
+    def _detect_text_with_coordinates(
+        self, 
+        image: Any
+    ) -> List[Dict[str, Any]]:
+        """Detect text regions and their coordinates using RapidOCR.
 
-        # Common medical abbreviations and terminology
-        medical_patterns = [
-            # Temperature
-            (r"\b(\d+(?:\.\d+)?)\s*(°?C)\b", r"\1°C"),
-            (r"\b(\d+(?:\.\d+)?)\s*(°?F)\b", r"\1°F"),
-            
-            # Blood pressure
-            (r"\b(\d{2,3})/(\d{2,3})\s*(mmHg)?\b", r"\1/\2 mmHg"),
-            
-            # Weight
-            (r"\b(\d+(?:\.\d+)?)\s*(kg)\b", r"\1 kg"),
-            (r"\b(\d+(?:\.\d+)?)\s*(g)\b", r"\1 g"),
-            
-            # Height
-            (r"\b(\d+(?:\.\d+)?)\s*(cm)\b", r"\1 cm"),
-            (r"\b(\d+(?:\.\d+)?)\s*(m)\b", r"\1 m"),
-            
-            # Medical abbreviations
-            (r"\bBP\b", "Blood Pressure"),
-            (r"\bHR\b", "Heart Rate"),
-            (r"\bRR\b", "Respiratory Rate"),
-            (r"\bSPO2\b", "SpO₂"),
-            (r"\bBMI\b", "BMI"),
-            
-            # Date formats
-            (r"\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b", r"\1-\2-\3"),
-        ]
+        Args:
+            image: PIL Image or numpy array
 
-        for pattern, replacement in medical_patterns:
-            content = re.sub(pattern, replacement, content)
+        Returns:
+            List of detected text regions with coordinates
+        """
+        if self._rapidocr_reader is None:
+            return []
 
-        return content
-
-    def _clean_medical_ocr_artifacts(self, content: str) -> str:
-        """Clean common OCR artifacts in medical documents."""
-        # Fix common OCR errors in medical context
-        fixes = [
-            # Numbers and letters
-            ("l", "1"),  # lowercase L to 1
-            ("O", "0"),  # uppercase O to 0
-            ("o", "0"),  # lowercase o to 0
+        try:
+            # Convert PIL Image to numpy if needed
+            from PIL import Image
+            import numpy as np
             
-            # Medical symbols
-            ("\\", "/"),  # Backslash to forward slash
-            ("~", "-"),   # Tilde to hyphen
-            
-            # Remove extra whitespace around numbers
-            (r"\s+(\d+)\s+", r" \1 "),
-            
-            # Normalize spaces around slashes
-            (r"\s*/\s*", "/"),
-        ]
-
-        for old, new in fixes:
-            if isinstance(old, str):
-                content = content.replace(old, new)
+            if isinstance(image, Image.Image):
+                img_np = np.array(image.convert("RGB"))
             else:
-                content = re.sub(old, new, content)
+                img_np = image
 
-        return content
+            # Run RapidOCR detection and recognition
+            result, _, _ = self._rapidocr_reader(img_np)
+            
+            if result is None:
+                return []
 
-    def _format_medical_content(self, content: str, label: str) -> str:
-        """Apply medical-specific formatting."""
-        if content is None:
-            return content
+            # Parse results
+            detected_texts = []
+            for item in result:
+                # item format: [box, text, score]
+                # box format: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+                box = item[0]
+                text = item[1]
+                score = item[2]
+                
+                # Calculate bounding box
+                x_coords = [p[0] for p in box]
+                y_coords = [p[1] for p in box]
+                x1, y1 = min(x_coords), min(y_coords)
+                x2, y2 = max(x_coords), max(y_coords)
+                
+                # Normalize coordinates (0-1000 scale)
+                height, width = img_np.shape[:2]
+                x1_norm = int(x1 / width * 1000)
+                y1_norm = int(y1 / height * 1000)
+                x2_norm = int(x2 / width * 1000)
+                y2_norm = int(y2 / height * 1000)
+                
+                detected_texts.append({
+                    "text": text,
+                    "score": float(score),
+                    "bbox_2d": [x1_norm, y1_norm, x2_norm, y2_norm],
+                    "polygon": [[int(p[0]), int(p[1])] for p in box],
+                })
+            
+            return detected_texts
 
-        content = str(content)
+        except Exception as e:
+            logger.warning(f"Text detection failed: {e}")
+            return []
 
-        # Clean OCR artifacts
-        content = self._clean_medical_ocr_artifacts(content)
+    def _match_ocr_with_coordinates(
+        self, 
+        ocr_content: str, 
+        detected_texts: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Match OCR content with detected text coordinates.
 
-        # Normalize medical terminology
-        content = self._normalize_medical_terminology(content)
+        Args:
+            ocr_content: Raw OCR text content
+            detected_texts: Detected text regions with coordinates
 
-        # Special handling for tables
-        if label == "table":
-            content = self._format_medical_table(content)
+        Returns:
+            List of matched results with text and coordinates
+        """
+        if not detected_texts:
+            return [{"text": ocr_content, "bbox_2d": None, "polygon": None}]
 
-        return content
-
-    def _format_medical_table(self, content: str) -> str:
-        """Format medical tables for better readability."""
-        if not content.startswith("<table"):
-            return content
-
-        # Add spacing around table cells
-        content = re.sub(r"<td>", "<td> ", content)
-        content = re.sub(r"</td>", " </td>", content)
-
-        # Ensure proper newline handling
-        content = content.replace("</tr>", "</tr>\n")
-
-        return content
-
-    # =========================================================================
-    # Override parent methods
-    # =========================================================================
-
-    def _clean_content(self, content: str) -> str:
-        """Clean content with medical-specific enhancements."""
-        content = super()._clean_content(content)
+        matched_results = []
         
-        # Add medical-specific cleaning
-        content = self._clean_medical_ocr_artifacts(content)
+        # Sort detected texts by position (top to bottom, left to right)
+        sorted_texts = sorted(
+            detected_texts, 
+            key=lambda x: (x["bbox_2d"][1], x["bbox_2d"][0])
+        )
         
-        return content
+        # Build matched results
+        for det in sorted_texts:
+            matched_results.append({
+                "text": det["text"],
+                "score": det["score"],
+                "bbox_2d": det["bbox_2d"],
+                "polygon": det["polygon"],
+            })
+        
+        return matched_results
 
-    def _format_content(self, content: Any, label: str, native_label: str) -> str:
-        """Format content with medical-specific enhancements."""
-        # First apply parent formatting
-        content = super()._format_content(content, label, native_label)
-        
-        # Then apply medical-specific formatting
-        content = self._format_medical_content(content, label)
-        
-        return content
+    def format_ocr_result(
+        self, 
+        content: str, 
+        page_idx: int = 0,
+        image: Any = None
+    ) -> Tuple[str, str]:
+        """Format OCR result with coordinate information.
 
-    def format_ocr_result(self, content: str, page_idx: int = 0) -> Tuple[str, str]:
-        """Format OCR result with medical enhancements."""
-        # Clean content first
-        content = self._clean_medical_ocr_artifacts(content)
-        content = self._normalize_medical_terminology(content)
-        
-        # Call parent method
-        return super().format_ocr_result(content, page_idx)
+        Args:
+            content: Raw OCR output text
+            page_idx: Page index
+            image: PIL Image for coordinate detection (optional)
+
+        Returns:
+            (json_str, markdown_str) where json_str includes coordinate information
+        """
+        # Clean content
+        content = self._clean_content(content)
+
+        # Detect text coordinates if image is provided
+        detected_texts = []
+        if image is not None:
+            detected_texts = self._detect_text_with_coordinates(image)
+
+        # Match OCR content with coordinates
+        if detected_texts:
+            # Use coordinate-matched results
+            matched_results = self._match_ocr_with_coordinates(content, detected_texts)
+            
+            # Build JSON with coordinates
+            json_result = [
+                {
+                    "index": i,
+                    "label": "text",
+                    "content": item["text"],
+                    "score": item.get("score", 1.0),
+                    "bbox_2d": item["bbox_2d"],
+                    "polygon": item.get("polygon"),
+                }
+                for i, item in enumerate(matched_results)
+            ]
+            
+            # Build markdown
+            markdown_result = "\n".join(item["text"] for item in matched_results)
+        else:
+            # Fallback to standard format without coordinates
+            json_result = [
+                {
+                    "index": 0,
+                    "label": "text",
+                    "content": content,
+                    "bbox_2d": None,
+                }
+            ]
+            markdown_result = content
+
+        json_str = json.dumps(json_result, ensure_ascii=False)
+        return json_str, markdown_result
 
     def process(
         self,
@@ -175,59 +211,102 @@ class MedicalResultFormatter(ResultFormatter):
         cropped_images: Dict[tuple, Any] | None = None,
         image_prefix: str = "cropped",
     ) -> Tuple[str, str, Dict[str, Any]]:
-        """Process grouped results with medical enhancements."""
-        # First apply medical-specific preprocessing to results
-        preprocessed_results = []
-        for page_results in grouped_results:
-            preprocessed_page = []
-            for item in page_results:
-                item_copy = deepcopy(item)
-                
-                # Apply medical formatting to content
-                if "content" in item_copy and item_copy["content"]:
-                    label = item_copy.get("label", "text")
-                    item_copy["content"] = self._format_medical_content(
-                        item_copy["content"], label
-                    )
-                
-                preprocessed_page.append(item_copy)
-            preprocessed_results.append(preprocessed_page)
+        """Process grouped results with coordinate enhancement.
 
-        # Call parent process with preprocessed results
+        Args:
+            grouped_results: Region recognition results grouped by page
+            cropped_images: Pre-cropped images with coordinates
+            image_prefix: Filename prefix for saved images
+
+        Returns:
+            (json_str, markdown_str, image_files)
+        """
+        # Call parent process first
         json_str, markdown_str, image_files = super().process(
-            preprocessed_results,
+            grouped_results,
             cropped_images=cropped_images,
             image_prefix=image_prefix,
         )
-
-        # Apply additional medical post-processing to markdown
-        markdown_str = self._post_process_markdown(markdown_str)
-
+        
+        # Parse and enhance with coordinates if images are available
+        if cropped_images:
+            json_data = json.loads(json_str)
+            enhanced_json = []
+            
+            for page_idx, page_results in enumerate(json_data):
+                enhanced_page = []
+                for region in page_results:
+                    region_copy = region.copy()
+                    
+                    # Try to find matching image
+                    bbox = region.get("bbox_2d", [])
+                    if bbox and cropped_images:
+                        key = (page_idx, *bbox) if bbox else None
+                        img = cropped_images.get(key) if key else None
+                        
+                        if img is not None:
+                            # Detect text with coordinates in this region
+                            detected = self._detect_text_with_coordinates(img)
+                            if detected:
+                                # Combine detected texts
+                                combined_text = " ".join(d["text"] for d in detected)
+                                combined_bbox = self._merge_bboxes([d["bbox_2d"] for d in detected])
+                                combined_polygon = self._merge_polygons([d.get("polygon", []) for d in detected])
+                                
+                                region_copy["content"] = combined_text
+                                region_copy["bbox_2d"] = combined_bbox
+                                region_copy["polygon"] = combined_polygon
+                                region_copy["detected_count"] = len(detected)
+                    
+                    enhanced_page.append(region_copy)
+                enhanced_json.append(enhanced_page)
+            
+            json_str = json.dumps(enhanced_json, ensure_ascii=False)
+        
         return json_str, markdown_str, image_files
 
-    def _post_process_markdown(self, markdown: str) -> str:
-        """Apply final medical-specific markdown processing."""
-        # Add section headers for medical documents
-        lines = markdown.split("\n")
-        processed_lines = []
-        
-        for i, line in enumerate(lines):
-            # Add emphasis to medical terms
-            line = self._emphasize_medical_terms(line)
-            processed_lines.append(line)
-        
-        return "\n".join(processed_lines)
+    def _merge_bboxes(self, bboxes: List[List[int]]) -> List[int]:
+        """Merge multiple bounding boxes into one.
 
-    def _emphasize_medical_terms(self, text: str) -> str:
-        """Add emphasis to common medical terms."""
-        medical_terms = [
-            "Blood Pressure", "Heart Rate", "Respiratory Rate",
-            "SpO₂", "BMI", "Temperature",
-            "mmHg", "kg", "cm", "°C", "°F",
+        Args:
+            bboxes: List of [x1, y1, x2, y2] boxes
+
+        Returns:
+            Merged [x1, y1, x2, y2] box
+        """
+        if not bboxes:
+            return [0, 0, 1000, 1000]
+        
+        x1 = min(b[0] for b in bboxes)
+        y1 = min(b[1] for b in bboxes)
+        x2 = max(b[2] for b in bboxes)
+        y2 = max(b[3] for b in bboxes)
+        
+        return [x1, y1, x2, y2]
+
+    def _merge_polygons(self, polygons: List[List[List[int]]]) -> List[List[int]]:
+        """Merge multiple polygons into one.
+
+        Args:
+            polygons: List of polygon point lists
+
+        Returns:
+            Merged polygon points
+        """
+        if not polygons:
+            return [[0, 0], [1000, 0], [1000, 1000], [0, 1000]]
+        
+        # Flatten and find bounds
+        all_points = [p for poly in polygons for p in poly]
+        if not all_points:
+            return [[0, 0], [1000, 0], [1000, 1000], [0, 1000]]
+        
+        x_coords = [p[0] for p in all_points]
+        y_coords = [p[1] for p in all_points]
+        
+        return [
+            [min(x_coords), min(y_coords)],
+            [max(x_coords), min(y_coords)],
+            [max(x_coords), max(y_coords)],
+            [min(x_coords), max(y_coords)],
         ]
-        
-        for term in medical_terms:
-            pattern = re.escape(term)
-            text = re.sub(rf"\b({pattern})\b", r"**\1**", text)
-        
-        return text
