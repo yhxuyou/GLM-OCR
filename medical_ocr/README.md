@@ -144,6 +144,114 @@ for result in pipeline.process(request_data):
 pipeline.stop()
 ```
 
+## 高并发服务器
+
+### 快速启动
+
+#### 开发模式
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+
+# 启动开发服务器
+python -m medical_ocr.high_perf_server
+```
+
+#### 生产模式
+
+```bash
+# 使用启动脚本
+./start_server.sh prod
+
+# 或者使用 uvicorn 直接启动
+uvicorn medical_ocr.high_perf_server:app --host 0.0.0.0 --port 8080 --workers 4 --loop uvloop
+```
+
+#### Docker 部署
+
+```bash
+# 使用 Docker Compose
+docker-compose up -d
+
+# 检查状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs -f medical-ocr
+```
+
+### API 接口
+
+#### 1. 健康检查
+
+```bash
+curl http://localhost:8080/health
+```
+
+#### 2. 单文档处理
+
+```bash
+curl -X POST http://localhost:8080/ocr/parse \
+  -H "Content-Type: application/json" \
+  -d '{
+    "images": ["https://example.com/medical_doc.jpg"]
+  }'
+```
+
+#### 3. 批量处理
+
+```bash
+curl -X POST http://localhost:8080/ocr/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "requests": [
+      {"images": ["https://example.com/doc1.jpg"]},
+      {"images": ["https://example.com/doc2.jpg"]}
+    ]
+  }'
+```
+
+#### 4. 缓存管理
+
+```bash
+# 查看缓存统计
+curl http://localhost:8080/cache/stats
+
+# 清空缓存
+curl -X DELETE http://localhost:8080/cache
+```
+
+#### 5. 监控指标
+
+```bash
+# Prometheus metrics
+curl http://localhost:8001/metrics
+```
+
+### 高并发特性
+
+| 特性 | 说明 |
+|------|------|
+| **异步处理** | 使用 FastAPI + asyncio 实现非阻塞请求处理 |
+| **线程池** | 线程池执行 CPU 密集型 OCR 任务 |
+| **Redis 缓存** | 自动缓存重复请求，支持 TTL 过期 |
+| **批量处理** | 支持最多 50 个请求批量处理 |
+| **监控指标** | Prometheus 指标监控 |
+| **优雅关闭** | 支持信号处理和资源清理 |
+
+### 配置说明
+
+编辑 `server_config.ini` 或通过环境变量配置：
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| REDIS_HOST | localhost | Redis 主机 |
+| REDIS_PORT | 6379 | Redis 端口 |
+| THREAD_POOL_SIZE | 8 | 线程池大小 |
+| PROMETHEUS_PORT | 8001 | 监控端口 |
+| MAX_BATCH_SIZE | 50 | 批量处理上限 |
+
 ## 许可证
 
 Apache-2.0

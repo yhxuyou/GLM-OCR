@@ -1,0 +1,24 @@
+# Core dependencies
+glmocr
+Pillow
+numpy
+opencv-python
+
+# FastAPI and web
+fastapi
+uvicorn
+uvloop
+httptools
+
+# Redis for caching
+redis
+
+# Prometheus metrics
+prometheus-client
+
+# Pydantic for validation
+pydantic
+
+# Optional: for development
+# pytest
+# pytest-asyncio
