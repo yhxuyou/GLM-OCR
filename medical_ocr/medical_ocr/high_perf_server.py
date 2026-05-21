@@ -1,468 +1,801 @@
-"""High-performance Medical OCR Server with async support.
+"""High-performance Medical OCR Flask Server.
 
-Features:
-- Async request handling using FastAPI
-- Thread pool for CPU-bound OCR processing
+Based on the original server.py with enhanced concurrency support:
+- Thread pool for parallel request processing
 - Redis-based caching for duplicate requests
-- Batch processing support
 - Prometheus metrics for monitoring
+- Batch processing support
 - Graceful shutdown handling
-- Health check endpoints
 """
 
-import asyncio
+import os
+import sys
+import time
+import traceback
+import uuid
+import multiprocessing
 import hashlib
 import json
-import uuid
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from typing import List, Dict, Any, Optional, Union
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, Dict, Any, List
+from functools import lru_cache
 
-import redis
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from prometheus_client import (
-    start_http_server,
-    Counter,
-    Histogram,
-    Gauge,
-)
+try:
+    from flask import Flask, request, jsonify, Response
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
+    Flask = None
+    request = None
+    jsonify = None
+    Response = None
 
-# Import MedicalOCR components
-from medical_ocr import MedicalOcrPipeline
-from glmocr.config import load_config
+from glmocr.config import load_config, GlmOcrConfig
+from glmocr.utils.logging import get_logger, configure_logging
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="Medical OCR Server",
-    description="High-performance OCR service for medical documents",
-    version="1.0.0",
-)
+from medical_ocr.pipeline import MedicalOcrPipeline
+from medical_ocr.layout_detector import MedicalLayoutDetector
 
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+logger = get_logger(__name__)
+
+os.environ["http_proxy"] = ""
+os.environ["https_proxy"] = ""
 
 # =========================================================================
-# Configuration
+# High-Performance Configuration
 # =========================================================================
 
-class Settings:
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
-    REDIS_DB: int = 0
-    REDIS_CACHE_TTL: int = 3600  # 1 hour
+class HighPerfConfig:
+    """High-performance server configuration."""
     
-    THREAD_POOL_SIZE: int = 8
+    # Thread pool settings
+    THREAD_POOL_SIZE: int = int(os.getenv("THREAD_POOL_SIZE", "8"))
     
-    PROMETHEUS_PORT: int = 8001
+    # Redis cache settings
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_CACHE_TTL: int = int(os.getenv("REDIS_CACHE_TTL", "3600"))
+    REDIS_ENABLED: bool = os.getenv("REDIS_ENABLED", "false").lower() == "true"
     
-    MAX_BATCH_SIZE: int = 50
-    MAX_REQUEST_SIZE: int = 10 * 1024 * 1024  # 10MB
+    # Batch processing settings
+    MAX_BATCH_SIZE: int = int(os.getenv("MAX_BATCH_SIZE", "50"))
     
-    MODEL_WARMUP_ENABLED: bool = True
+    # Prometheus settings
+    PROMETHEUS_ENABLED: bool = os.getenv("PROMETHEUS_ENABLED", "false").lower() == "true"
+    PROMETHEUS_PORT: int = int(os.getenv("PROMETHEUS_PORT", "8001"))
 
-settings = Settings()
-
-# =========================================================================
-# Metrics
-# =========================================================================
-
-REQUEST_COUNT = Counter(
-    "ocr_requests_total",
-    "Total number of OCR requests",
-    ["endpoint", "status"]
-)
-
-REQUEST_LATENCY = Histogram(
-    "ocr_request_duration_seconds",
-    "OCR request duration in seconds",
-    ["endpoint"]
-)
-
-CACHE_HITS = Counter(
-    "ocr_cache_hits_total",
-    "Number of cache hits"
-)
-
-CACHE_MISSES = Counter(
-    "ocr_cache_misses_total",
-    "Number of cache misses"
-)
-
-ACTIVE_WORKERS = Gauge(
-    "ocr_active_workers",
-    "Number of active workers"
-)
-
-PENDING_TASKS = Gauge(
-    "ocr_pending_tasks",
-    "Number of pending tasks in queue"
-)
+# Global instances
+high_perf_config = HighPerfConfig()
+executor = None
+redis_client = None
 
 # =========================================================================
-# Redis Cache
+# Prometheus Metrics (if enabled)
 # =========================================================================
 
-class CacheManager:
+if HighPerfConfig.PROMETHEUS_ENABLED:
+    try:
+        from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+        METRICS_ENABLED = True
+        
+        REQUEST_COUNT = Counter(
+            "ocr_requests_total",
+            "Total OCR requests",
+            ["endpoint", "status"]
+        )
+        REQUEST_LATENCY = Histogram(
+            "ocr_request_duration_seconds",
+            "OCR request duration in seconds",
+            ["endpoint"]
+        )
+        CACHE_HITS = Counter("ocr_cache_hits_total", "Number of cache hits")
+        CACHE_MISSES = Counter("ocr_cache_misses_total", "Number of cache misses")
+        ACTIVE_WORKERS = Gauge("ocr_active_workers", "Number of active workers")
+        PENDING_TASKS = Gauge("ocr_pending_tasks", "Number of pending tasks")
+        
+    except ImportError:
+        METRICS_ENABLED = False
+        logger.warning("prometheus_client not installed, metrics disabled")
+else:
+    METRICS_ENABLED = False
+
+# =========================================================================
+# Redis Cache Manager
+# =========================================================================
+
+class RedisCacheManager:
+    """Redis-based cache manager for OCR results."""
+    
     def __init__(self, host: str, port: int, db: int, ttl: int):
-        self.client = redis.Redis(host=host, port=port, db=db)
+        self.host = host
+        self.port = port
+        self.db = db
         self.ttl = ttl
+        self._client = None
+        self._connect()
     
-    def get_cache_key(self, data: Any) -> str:
-        """Generate cache key from request data."""
-        if isinstance(data, dict):
-            serialized = json.dumps(data, sort_keys=True).encode('utf-8')
-        else:
-            serialized = str(data).encode('utf-8')
-        return hashlib.md5(serialized).hexdigest()
-    
-    def get(self, key: str) -> Optional[Dict]:
-        """Get cached result."""
+    def _connect(self):
+        """Connect to Redis."""
         try:
-            value = self.client.get(key)
-            if value:
-                CACHE_HITS.inc()
-                return json.loads(value)
-            CACHE_MISSES.inc()
-            return None
-        except Exception:
-            return None
-    
-    def set(self, key: str, value: Dict):
-        """Set cache with TTL."""
-        try:
-            self.client.setex(key, self.ttl, json.dumps(value))
-        except Exception:
-            pass
-    
-    def delete(self, key: str):
-        """Delete cached item."""
-        try:
-            self.client.delete(key)
-        except Exception:
-            pass
-    
-    def flush(self):
-        """Flush all cache."""
-        try:
-            self.client.flushdb()
-        except Exception:
-            pass
-
-# =========================================================================
-# OCR Processor
-# =========================================================================
-
-class OCRProcessor:
-    _instance = None
-    _lock = asyncio.Lock()
-    
-    def __init__(self):
-        self.pipeline = None
-        self.executor = ThreadPoolExecutor(max_workers=settings.THREAD_POOL_SIZE)
-    
-    @classmethod
-    async def get_instance(cls):
-        """Get singleton instance with lazy initialization."""
-        if cls._instance is None:
-            async with cls._lock:
-                if cls._instance is None:
-                    cls._instance = OCRProcessor()
-                    await cls._instance._initialize()
-        return cls._instance
-    
-    async def _initialize(self):
-        """Initialize pipeline in background."""
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(self.executor, self._init_pipeline)
-    
-    def _init_pipeline(self):
-        """Initialize MedicalOcrPipeline."""
-        try:
-            config = load_config()
-            self.pipeline = MedicalOcrPipeline(
-                config=config.pipeline,
-                yolo_model_dir=getattr(config, 'yolo_model_dir', None),
-                uvdoc_model_dir=getattr(config, 'uvdoc_model_dir', None),
+            import redis
+            self._client = redis.Redis(
+                host=self.host,
+                port=self.port,
+                db=self.db,
+                decode_responses=False,
+                socket_connect_timeout=5,
+                socket_timeout=5
             )
-            self.pipeline.start()
-            print(f"✅ OCR Pipeline initialized successfully")
+            self._client.ping()
+            logger.info(f"Redis connected: {self.host}:{self.port}")
         except Exception as e:
-            print(f"❌ Failed to initialize OCR Pipeline: {e}")
+            logger.warning(f"Redis connection failed: {e}. Caching disabled.")
+            self._client = None
+    
+    def _generate_key(self, data: Dict) -> str:
+        """Generate cache key from request data."""
+        serialized = json.dumps(data, sort_keys=True)
+        return f"ocr:cache:{hashlib.md5(serialized.encode()).hexdigest()}"
+    
+    def get(self, data: Dict) -> Optional[Dict]:
+        """Get cached result."""
+        if not self._client:
+            return None
+        
+        try:
+            key = self._generate_key(data)
+            value = self._client.get(key)
+            
+            if METRICS_ENABLED:
+                if value:
+                    CACHE_HITS.inc()
+                else:
+                    CACHE_MISSES.inc()
+            
+            if value:
+                return json.loads(value)
+            return None
+        except Exception as e:
+            logger.warning(f"Cache get failed: {e}")
+            return None
+    
+    def set(self, data: Dict, result: Dict):
+        """Set cache with TTL."""
+        if not self._client:
+            return
+        
+        try:
+            key = self._generate_key(data)
+            self._client.setex(key, self.ttl, json.dumps(result))
+        except Exception as e:
+            logger.warning(f"Cache set failed: {e}")
+    
+    def clear(self):
+        """Clear all OCR cache."""
+        if not self._client:
+            return
+        
+        try:
+            keys = self._client.keys("ocr:cache:*")
+            if keys:
+                self._client.delete(*keys)
+            logger.info(f"Cleared {len(keys)} cache entries")
+        except Exception as e:
+            logger.warning(f"Cache clear failed: {e}")
+    
+    def get_stats(self) -> Dict:
+        """Get cache statistics."""
+        if not self._client:
+            return {"enabled": False}
+        
+        try:
+            keys = self._client.keys("ocr:cache:*")
+            return {
+                "enabled": True,
+                "cached_items": len(keys),
+                "ttl_seconds": self.ttl
+            }
+        except Exception:
+            return {"enabled": False}
+
+# =========================================================================
+# High-Performance Request Processor
+# =========================================================================
+
+class HighPerfProcessor:
+    """Process OCR requests with thread pool and caching."""
+    
+    def __init__(self, pipeline: MedicalOcrPipeline, cache_manager: RedisCacheManager = None):
+        self.pipeline = pipeline
+        self.cache = cache_manager
+        self._lock = threading.Lock()
+    
+    def _build_request_data(self, images: List[str]) -> Dict:
+        """Build request data for pipeline."""
+        messages = [{"role": "user", "content": []}]
+        for image_url in images:
+            messages[0]["content"].append(
+                {"type": "image_url", "image_url": {"url": image_url}}
+            )
+        return {"messages": messages}
+    
+    def process_single(
+        self, 
+        images: List[str],
+        preprocess_context: Optional[Dict] = None,
+        postprocess_context: Optional[Dict] = None,
+        use_cache: bool = True
+    ) -> Dict:
+        """Process a single OCR request."""
+        start_time = time.time()
+        request_data = self._build_request_data(images)
+        
+        # Check cache first
+        if use_cache and self.cache:
+            cached_result = self.cache.get(request_data)
+            if cached_result:
+                cached_result["cached"] = True
+                cached_result["processing_time"] = time.time() - start_time
+                return cached_result
+        
+        # Process request
+        try:
+            results = list(
+                self.pipeline.process(
+                    request_data,
+                    save_layout_visualization=False,
+                    preprocess_context=preprocess_context or {},
+                    postprocess_context=postprocess_context or {},
+                )
+            )
+            
+            # Build response
+            if not results:
+                result = {
+                    "json_result": None,
+                    "markdown_result": "",
+                    "pages": 0
+                }
+            elif len(results) == 1:
+                result = {
+                    "json_result": results[0].json_result,
+                    "markdown_result": results[0].markdown_result,
+                    "pages": 1
+                }
+            else:
+                result = {
+                    "json_result": [r.json_result for r in results],
+                    "markdown_result": "\n\n---\n\n".join(r.markdown_result or "" for r in results),
+                    "pages": len(results)
+                }
+            
+            # Cache the result
+            if use_cache and self.cache:
+                self.cache.set(request_data, result)
+            
+            result["cached"] = False
+            result["processing_time"] = time.time() - start_time
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Process error: {e}")
             raise
     
-    async def process(self, request_data: Dict) -> Dict:
-        """Process OCR request asynchronously."""
-        if self.pipeline is None:
-            raise HTTPException(status_code=503, detail="Service not ready")
+    def process_batch(self, requests: List[Dict]) -> List[Dict]:
+        """Process batch OCR requests using thread pool."""
+        if METRICS_ENABLED:
+            PENDING_TASKS.set(len(requests))
         
-        loop = asyncio.get_event_loop()
-        ACTIVE_WORKERS.inc()
-        
-        try:
-            result = await loop.run_in_executor(
-                self.executor,
-                self._process_sync,
-                request_data
-            )
-            return result
-        finally:
-            ACTIVE_WORKERS.dec()
-    
-    def _process_sync(self, request_data: Dict) -> Dict:
-        """Synchronous OCR processing."""
-        results = list(self.pipeline.process(request_data))
-        
-        if len(results) == 1:
-            return {
-                "json_result": results[0].json_result,
-                "markdown_result": results[0].markdown_result,
-                "pages": 1
-            }
-        
-        # Multiple pages
-        return {
-            "json_result": [r.json_result for r in results],
-            "markdown_result": "\n\n---\n\n".join(r.markdown_result or "" for r in results),
-            "pages": len(results)
-        }
-    
-    async def process_batch(self, requests: List[Dict]) -> List[Dict]:
-        """Process batch requests."""
         results = []
+        futures = []
         
-        for i, request_data in enumerate(requests):
+        # Submit all tasks
+        for idx, req in enumerate(requests):
+            images = req.get("images", [])
+            if isinstance(images, str):
+                images = [images]
+            
+            future = executor.submit(
+                self.process_single,
+                images,
+                req.get("preprocess_options"),
+                req.get("postprocess_options"),
+                True
+            )
+            futures.append((idx, future))
+        
+        # Collect results
+        for idx, future in futures:
             try:
-                result = await self.process(request_data)
+                result = future.result(timeout=120)
                 results.append({
-                    "index": i,
+                    "index": idx,
                     "success": True,
                     "data": result
                 })
             except Exception as e:
                 results.append({
-                    "index": i,
+                    "index": idx,
                     "success": False,
                     "error": str(e)
                 })
         
+        if METRICS_ENABLED:
+            PENDING_TASKS.set(0)
+        
         return results
-    
-    def shutdown(self):
-        """Cleanup resources."""
-        if self.pipeline:
-            self.pipeline.stop()
-        self.executor.shutdown(wait=True)
 
 # =========================================================================
-# Request Models
+# Response Builder (from original server.py)
 # =========================================================================
 
-class OCRRequest(BaseModel):
-    images: Union[str, List[str]] = Field(
-        ..., description="Single image URL or list of image URLs"
-    )
-    options: Optional[Dict[str, Any]] = Field(
-        None, description="Processing options"
-    )
-
-class BatchOCRRequest(BaseModel):
-    requests: List[OCRRequest] = Field(
-        ..., max_items=settings.MAX_BATCH_SIZE,
-        description="List of OCR requests"
-    )
-
-class TaskResponse(BaseModel):
-    task_id: str = Field(..., description="Unique task identifier")
-    status: str = Field(..., description="Task status: pending/processing/completed/failed")
-    created_at: datetime = Field(..., description="Task creation time")
-
-class OCRResponse(BaseModel):
-    json_result: str = Field(..., description="JSON formatted OCR result")
-    markdown_result: str = Field(..., description="Markdown formatted OCR result")
-    pages: int = Field(..., description="Number of processed pages")
-    cached: bool = Field(False, description="Whether result was from cache")
-    processing_time: float = Field(..., description="Processing time in seconds")
-
-# =========================================================================
-# Routes
-# =========================================================================
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup."""
-    global cache_manager
-    cache_manager = CacheManager(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        db=settings.REDIS_DB,
-        ttl=settings.REDIS_CACHE_TTL
-    )
-    
-    # Initialize OCR processor
-    await OCRProcessor.get_instance()
-    
-    # Start Prometheus metrics server
-    start_http_server(settings.PROMETHEUS_PORT)
-    
-    print(f"🚀 Medical OCR Server started successfully")
-    print(f"📊 Metrics available on port {settings.PROMETHEUS_PORT}")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup resources on shutdown."""
-    processor = await OCRProcessor.get_instance()
-    processor.shutdown()
-    print("🛑 Medical OCR Server shut down gracefully")
-
-@app.get("/health", tags=["Health"])
-async def health_check():
-    """Health check endpoint."""
-    processor = await OCRProcessor.get_instance()
-    return {
-        "status": "healthy",
-        "service": "medical-ocr",
-        "version": "1.0.0",
-        "pipeline_ready": processor.pipeline is not None,
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-@app.get("/metrics", tags=["Metrics"])
-async def metrics():
-    """Prometheus metrics endpoint."""
-    from prometheus_client import generate_latest
-    return generate_latest()
-
-@app.post("/ocr/parse", tags=["OCR"], response_model=OCRResponse)
-@REQUEST_LATENCY.time(endpoint="parse")
-async def parse_document(request: OCRRequest):
-    """Process a single OCR request."""
-    start_time = datetime.now()
-    
-    # Normalize request data
-    request_data = {
-        "messages": [{
-            "role": "user",
-            "content": []
-        }]
+def _build_response(
+    json_result: Optional[str],
+    markdown_result: Optional[str],
+    extra_info: Optional[Dict[str, Any]] = None,
+    cached: bool = False,
+    processing_time: float = 0.0
+) -> Dict[str, Any]:
+    """Build API response with medical OCR specific metadata."""
+    response = {
+        # SDK native fields
+        "json_result": json_result,
+        "markdown_result": markdown_result,
+        # MaaS-compatible fields
+        "layout_details": json_result,
+        "md_results": markdown_result,
+        "data_info": {"pages": []},
+        "usage": {},
+        "model": "medical-ocr",
+        "id": f"chatcmpl-{uuid.uuid4().hex[:29]}",
+        "created": int(time.time()),
+        # Medical OCR specific
+        "is_medical_ocr": True,
+        "version": "0.1.0",
+        # High-performance metadata
+        "cached": cached,
+        "processing_time": processing_time,
     }
     
-    images = request.images
-    if isinstance(images, str):
-        images = [images]
+    if extra_info:
+        response.update(extra_info)
+        
+    return response
+
+# =========================================================================
+# Flask Application (Enhanced from original)
+# =========================================================================
+
+def create_app(config: GlmOcrConfig) -> Flask:
+    """Create High-Performance Medical OCR Flask application.
     
-    for image_url in images:
-        request_data["messages"][0]["content"].append({
-            "type": "image_url",
-            "image_url": {"url": image_url}
+    Args:
+        config: Configuration object
+        
+    Returns:
+        Flask application instance with high-performance features
+    """
+    if not FLASK_AVAILABLE:
+        raise ImportError(
+            "Flask server support requires the optional server extra. "
+            "Install with: pip install flask"
+        )
+
+    app = Flask(__name__)
+    
+    # Initialize cache manager
+    global redis_client
+    if high_perf_config.REDIS_ENABLED:
+        redis_client = RedisCacheManager(
+            host=high_perf_config.REDIS_HOST,
+            port=high_perf_config.REDIS_PORT,
+            db=high_perf_config.REDIS_DB,
+            ttl=high_perf_config.REDIS_CACHE_TTL
+        )
+
+    # Initialize medical-specific layout detector
+    medical_layout_detector = MedicalLayoutDetector(config.pipeline.layout)
+    
+    # Initialize medical OCR pipeline
+    pipeline = MedicalOcrPipeline(
+        config=config.pipeline,
+        layout_detector=medical_layout_detector
+    )
+
+    # Initialize high-performance processor
+    processor = HighPerfProcessor(pipeline, redis_client)
+
+    # Store in app config
+    app.config["pipeline"] = pipeline
+    app.config["processor"] = processor
+    app.config["doc_config"] = config
+    app.config["is_medical_ocr"] = True
+    app.config["redis_cache"] = redis_client
+
+    # =====================================================================
+    # Health Check Endpoints
+    # =====================================================================
+
+    @app.route("/health", methods=["GET"])
+    def health_check():
+        """Health check endpoint."""
+        return jsonify({
+            "status": "ok",
+            "service": "medical-ocr",
+            "version": "0.0.2",
+            "is_medical_ocr": True,
+            "high_performance": True,
+            "thread_pool_size": high_perf_config.THREAD_POOL_SIZE,
+            "redis_enabled": redis_client is not None,
+            "prometheus_enabled": METRICS_ENABLED,
         })
-    
-    # Check cache
-    cache_key = cache_manager.get_cache_key(request_data)
-    cached_result = cache_manager.get(cache_key)
-    
-    if cached_result:
-        processing_time = (datetime.now() - start_time).total_seconds()
-        REQUEST_COUNT.labels(endpoint="parse", status="success").inc()
-        
-        return {
-            **cached_result,
-            "cached": True,
-            "processing_time": processing_time
-        }
-    
-    # Process request
-    processor = await OCRProcessor.get_instance()
-    result = await processor.process(request_data)
-    
-    # Cache result
-    cache_manager.set(cache_key, result)
-    
-    processing_time = (datetime.now() - start_time).total_seconds()
-    REQUEST_COUNT.labels(endpoint="parse", status="success").inc()
-    
-    return {
-        **result,
-        "cached": False,
-        "processing_time": processing_time
-    }
 
-@app.post("/ocr/batch", tags=["OCR"])
-@REQUEST_LATENCY.time(endpoint="batch")
-async def batch_parse(request: BatchOCRRequest):
-    """Process batch OCR requests."""
-    start_time = datetime.now()
-    
-    # Convert requests to internal format
-    internal_requests = []
-    for req in request.requests:
-        data = {
-            "messages": [{
-                "role": "user",
-                "content": []
-            }]
-        }
+    @app.route("/health/ready", methods=["GET"])
+    def readiness_check():
+        """Readiness check endpoint."""
+        try:
+            pipeline = app.config["pipeline"]
+            return jsonify({
+                "status": "ready",
+                "pipeline_running": pipeline is not None
+            })
+        except Exception as e:
+            return jsonify({
+                "status": "not_ready",
+                "error": str(e)
+            }), 503
+
+    # =====================================================================
+    # Main OCR Endpoint (Enhanced with caching)
+    # =====================================================================
+
+    @app.route("/medical-ocr/parse", methods=["POST"])
+    def parse_medical_document():
+        """Medical document parsing endpoint with caching.
         
-        images = req.images
+        Original logic preserved, only added caching layer.
+        """
+        if request.headers.get("Content-Type") != "application/json":
+            return jsonify({
+                "error": "Invalid Content-Type. Expected 'application/json'."
+            }), 400
+
+        try:
+            data = request.json
+        except Exception as e:
+            logger.warning(f"Failed to parse JSON: {e}")
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        # Get images from request (same as original)
+        images = data.get("images", [])
         if isinstance(images, str):
             images = [images]
+
+        if not images and "file" in data:
+            file_val = data["file"]
+            if isinstance(file_val, str) and file_val:
+                images = [file_val]
+
+        if not images:
+            return jsonify({"error": "No images provided"}), 400
+
+        # Get processing options (same as original)
+        preprocess_context = data.get("preprocess_options", {})
+        postprocess_context = data.get("postprocess_options", {})
+
+        try:
+            # Process with high-performance processor
+            processor = app.config["processor"]
+            result = processor.process_single(
+                images,
+                preprocess_context,
+                postprocess_context,
+                use_cache=True
+            )
+
+            return jsonify(_build_response(
+                result["json_result"],
+                result["markdown_result"],
+                cached=result.get("cached", False),
+                processing_time=result.get("processing_time", 0.0)
+            )), 200
+
+        except Exception as e:
+            logger.error(f"Parse error: {e}")
+            logger.debug(traceback.format_exc())
+            return jsonify({"error": f"Parse error: {str(e)}"}), 500
+
+    # =====================================================================
+    # Enhanced OCR Endpoint (from original)
+    # =====================================================================
+
+    @app.route("/medical-ocr/parse/enhanced", methods=["POST"])
+    def parse_enhanced_medical():
+        """Enhanced medical document parsing with advanced options."""
+        if request.headers.get("Content-Type") != "application/json":
+            return jsonify({
+                "error": "Invalid Content-Type. Expected 'application/json'."
+            }), 400
+
+        try:
+            data = request.json
+        except Exception as e:
+            logger.warning(f"Failed to parse JSON: {e}")
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        images = data.get("images", [])
+        if isinstance(images, str):
+            images = [images]
+
+        if not images and "file" in data:
+            file_val = data["file"]
+            if isinstance(file_val, str) and file_val:
+                images = [file_val]
+
+        if not images:
+            return jsonify({"error": "No images provided"}), 400
+
+        medical_enhancements = data.get("medical_enhancements", {})
+        postprocess_context = {
+            "enhancements": medical_enhancements
+        }
+
+        try:
+            processor = app.config["processor"]
+            result = processor.process_single(
+                images,
+                None,
+                postprocess_context,
+                use_cache=True
+            )
+
+            extra_info = {
+                "medical_enhancements_applied": medical_enhancements
+            }
+
+            return jsonify(_build_response(
+                result["json_result"],
+                result["markdown_result"],
+                extra_info,
+                cached=result.get("cached", False),
+                processing_time=result.get("processing_time", 0.0)
+            )), 200
+
+        except Exception as e:
+            logger.error(f"Enhanced parse error: {e}")
+            logger.debug(traceback.format_exc())
+            return jsonify({"error": f"Parse error: {str(e)}"}), 500
+
+    # =====================================================================
+    # Batch Processing Endpoint (NEW)
+    # =====================================================================
+
+    @app.route("/medical-ocr/batch", methods=["POST"])
+    def batch_parse_medical():
+        """Batch OCR processing endpoint.
         
-        for image_url in images:
-            data["messages"][0]["content"].append({
-                "type": "image_url",
-                "image_url": {"url": image_url}
+        NEW: Process multiple OCR requests in parallel using thread pool.
+        """
+        if request.headers.get("Content-Type") != "application/json":
+            return jsonify({
+                "error": "Invalid Content-Type. Expected 'application/json'."
+            }), 400
+
+        try:
+            data = request.json
+        except Exception as e:
+            logger.warning(f"Failed to parse JSON: {e}")
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        requests = data.get("requests", [])
+        
+        if not requests:
+            return jsonify({"error": "No requests provided"}), 400
+        
+        if len(requests) > high_perf_config.MAX_BATCH_SIZE:
+            return jsonify({
+                "error": f"Batch size exceeds maximum of {high_perf_config.MAX_BATCH_SIZE}"
+            }), 400
+
+        start_time = time.time()
+
+        try:
+            processor = app.config["processor"]
+            results = processor.process_batch(requests)
+
+            total_time = time.time() - start_time
+            success_count = sum(1 for r in results if r["success"])
+            failed_count = len(results) - success_count
+
+            return jsonify({
+                "results": results,
+                "total": len(results),
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "processing_time": total_time
+            }), 200
+
+        except Exception as e:
+            logger.error(f"Batch parse error: {e}")
+            logger.debug(traceback.format_exc())
+            return jsonify({"error": f"Batch parse error: {str(e)}"}), 500
+
+    # =====================================================================
+    # Cache Management Endpoints (NEW)
+    # =====================================================================
+
+    @app.route("/cache/stats", methods=["GET"])
+    def cache_stats():
+        """Get cache statistics."""
+        cache = app.config.get("redis_cache")
+        
+        if not cache:
+            return jsonify({
+                "enabled": False,
+                "message": "Redis cache is not enabled"
             })
         
-        internal_requests.append(data)
-    
-    # Process batch
-    processor = await OCRProcessor.get_instance()
-    results = await processor.process_batch(internal_requests)
-    
-    processing_time = (datetime.now() - start_time).total_seconds()
-    REQUEST_COUNT.labels(endpoint="batch", status="success").inc()
-    
-    return {
-        "results": results,
-        "total": len(results),
-        "success_count": sum(1 for r in results if r["success"]),
-        "failed_count": sum(1 for r in results if not r["success"]),
-        "processing_time": processing_time
-    }
+        stats = cache.get_stats()
+        return jsonify(stats)
 
-@app.delete("/cache", tags=["Cache"])
-async def clear_cache():
-    """Clear all cached results."""
-    cache_manager.flush()
-    return {"message": "Cache cleared successfully"}
+    @app.route("/cache", methods=["DELETE"])
+    def clear_cache():
+        """Clear all cached OCR results."""
+        cache = app.config.get("redis_cache")
+        
+        if not cache:
+            return jsonify({
+                "success": False,
+                "message": "Redis cache is not enabled"
+            }), 400
+        
+        cache.clear()
+        return jsonify({
+            "success": True,
+            "message": "Cache cleared successfully"
+        })
 
-@app.get("/cache/stats", tags=["Cache"])
-async def cache_stats():
-    """Get cache statistics."""
-    return {
-        "hits": CACHE_HITS._value.get(),
-        "misses": CACHE_MISSES._value.get()
-    }
+    # =====================================================================
+    # Prometheus Metrics Endpoint (NEW)
+    # =====================================================================
+
+    if METRICS_ENABLED:
+        @app.route("/metrics", methods=["GET"])
+        def metrics():
+            """Prometheus metrics endpoint."""
+            return Response(
+                generate_latest(),
+                mimetype=CONTENT_TYPE_LATEST
+            )
+
+    return app
+
 
 # =========================================================================
-# Main
+# Main Entry Point
 # =========================================================================
+
+def main():
+    """Main entry point for High-Performance Medical OCR server."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="High-Performance Medical OCR Server")
+    parser.add_argument(
+        "--config", type=str, default=None, help="Config file path"
+    )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default=None,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level"
+    )
+    parser.add_argument(
+        "--host", type=str, default="0.0.0.0", help="Host to bind to"
+    )
+    parser.add_argument(
+        "--port", type=int, default=8080, help="Port to listen on"
+    )
+    parser.add_argument(
+        "--workers", type=int, default=4, help="Number of worker threads"
+    )
+    parser.add_argument(
+        "--redis-enabled", action="store_true", default=False,
+        help="Enable Redis caching"
+    )
+    parser.add_argument(
+        "--redis-host", type=str, default="localhost",
+        help="Redis host"
+    )
+    parser.add_argument(
+        "--redis-port", type=int, default=6379,
+        help="Redis port"
+    )
+    
+    args = parser.parse_args()
+
+    # Set multiprocessing start method
+    multiprocessing.set_start_method("spawn", force=True)
+
+    # Initialize global executor
+    global executor
+    high_perf_config.THREAD_POOL_SIZE = args.workers
+    high_perf_config.REDIS_ENABLED = args.redis_enabled
+    high_perf_config.REDIS_HOST = args.redis_host
+    high_perf_config.REDIS_PORT = args.redis_port
+    
+    executor = ThreadPoolExecutor(max_workers=high_perf_config.THREAD_POOL_SIZE)
+    logger.info(f"Thread pool initialized with {high_perf_config.THREAD_POOL_SIZE} workers")
+
+    app = None
+
+    try:
+        config = load_config(args.config)
+
+        # Configure logging
+        log_level = args.log_level or getattr(config.logging, "level", "INFO")
+        configure_logging(level=log_level)
+
+        # Create app
+        app = create_app(config)
+
+        # Start pipeline
+        pipeline = app.config["pipeline"]
+        pipeline.start()
+
+        # Get server config
+        server_config = getattr(config, "server", None)
+        host = args.host or (server_config.host if server_config else "0.0.0.0")
+        port = args.port or (server_config.port if server_config else 8080)
+        debug = getattr(server_config, "debug", False) if server_config else False
+
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info(f"High-Performance Medical OCR Server starting on {host}:{port}")
+        logger.info("=" * 70)
+        logger.info(f"Thread Pool Size: {high_perf_config.THREAD_POOL_SIZE}")
+        logger.info(f"Redis Caching: {'Enabled' if high_perf_config.REDIS_ENABLED else 'Disabled'}")
+        logger.info(f"Prometheus Metrics: {'Enabled' if METRICS_ENABLED else 'Disabled'}")
+        logger.info("=" * 70)
+        logger.info("Endpoints:")
+        logger.info("  - GET  /health              : Health check")
+        logger.info("  - POST /medical-ocr/parse    : Single OCR processing")
+        logger.info("  - POST /medical-ocr/parse/enhanced : Enhanced OCR")
+        logger.info("  - POST /medical-ocr/batch    : Batch OCR processing")
+        logger.info("  - GET  /cache/stats         : Cache statistics")
+        logger.info("  - DELETE /cache             : Clear cache")
+        if METRICS_ENABLED:
+            logger.info("  - GET  /metrics             : Prometheus metrics")
+        logger.info("=" * 70)
+        logger.info("")
+
+        # Run with threaded mode for better concurrency
+        app.run(
+            host=host, 
+            port=port, 
+            debug=debug,
+            threaded=True,
+            use_reloader=False
+        )
+
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        logger.debug(traceback.format_exc())
+        sys.exit(1)
+    finally:
+        if executor:
+            executor.shutdown(wait=True)
+        if app is not None and "pipeline" in app.config:
+            try:
+                app.config["pipeline"].stop()
+            except Exception as e:
+                logger.warning(f"Error stopping pipeline: {e}")
+
 
 if __name__ == "__main__":
-    import uvicorn
-    
-    uvicorn.run(
-        "server:app",
-        host="0.0.0.0",
-        port=8080,
-        workers=4,
-        loop="uvloop",
-        reload=False
-    )
+    main()
