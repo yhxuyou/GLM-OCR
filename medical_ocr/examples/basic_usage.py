@@ -1,112 +1,141 @@
 """
-Medical OCR 基础使用示例 - 使用 MedicalOcrPipeline
+Medical OCR - Quick Start Example.
+
+This example demonstrates the basic usage of Medical OCR.
 """
 
+import os
 import sys
-from pathlib import Path
 
-# 添加项目路径
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, '/workspace/medical_ocr')
+
+from medical_ocr import (
+    MedicalPageLoader,
+    MedicalLayoutDetector,
+    MedicalResultFormatter,
+    MedicalOcrPipeline,
+)
+from medical_ocr.utils import setup_logging, SimpleCache
+
+from glmocr.config import load_config
+from glmocr.dataloader import PageLoaderConfig
 
 
-def main():
+def basic_usage():
+    """Basic usage example."""
+    
+    setup_logging("INFO")
+    
     print("=" * 70)
-    print("Medical OCR - 基础使用示例")
+    print("Medical OCR - Basic Usage Example")
     print("=" * 70)
-    print()
-
-    # 1. 导入依赖
-    print("1. 导入模块...")
+    
+    # 1. Load configuration
+    config = load_config()
+    print("\n1. Configuration loaded")
+    
+    # 2. Create components
+    print("\n2. Creating Medical OCR components...")
+    
+    # MedicalPageLoader with preprocessing
+    page_loader = MedicalPageLoader(
+        config=PageLoaderConfig(),
+        yolo_model_dir=None,  # Set path if available
+        uvdoc_model_dir=None,  # Set path if available
+        enable_preprocessing=True,
+    )
+    
+    # MedicalLayoutDetector
+    layout_detector = MedicalLayoutDetector(
+        config=config.pipeline.layout,
+    )
+    
+    # MedicalResultFormatter with RapidOCR coordinate extraction
+    result_formatter = MedicalResultFormatter(
+        config=config.pipeline.result_formatter,
+    )
+    
+    print("   ✅ Components created")
+    
+    # 3. Create pipeline
+    print("\n3. Creating MedicalOcrPipeline...")
+    
+    pipeline = MedicalOcrPipeline(
+        config=config.pipeline,
+        page_loader=page_loader,
+        layout_detector=layout_detector,
+        result_formatter=result_formatter,
+    )
+    
+    print("   ✅ Pipeline created")
+    
+    # 4. Start pipeline
+    print("\n4. Starting pipeline...")
+    pipeline.start()
+    print("   ✅ Pipeline started")
+    
+    # 5. Process example
+    print("\n5. Processing example...")
+    
+    example_images = [
+        "/path/to/medical_document_1.jpg",
+        "/path/to/medical_document_2.jpg",
+    ]
+    
     try:
-        from medical_ocr import MedicalOcrPipeline
-        from glmocr.config import load_config
-        print("   ✅ 模块导入成功")
+        # For demo, we just show the structure
+        print(f"\n   Would process {len(example_images)} images")
+        print("   (Set real image paths to process)")
     except Exception as e:
-        print(f"   ❌ 导入失败: {e}")
-        return
-
-    # 2. 加载配置
-    print("\n2. 加载配置...")
-    try:
-        config = load_config()
-        print("   ✅ 配置加载成功")
-    except Exception as e:
-        print(f"   ⚠️  配置加载失败: {e}")
-        print("   提示: 请确保 glmocr 已安装并正确配置")
-        return
-
-    # 3. 创建 Pipeline
-    print("\n3. 创建 MedicalOcrPipeline...")
-    try:
-        pipeline = MedicalOcrPipeline(
-            config=config.pipeline,
-            yolo_model_dir="/path/to/yolo/model",  # 替换为实际路径
-            uvdoc_model_dir="/path/to/uvdoc/model",  # 替换为实际路径
-        )
-        print("   ✅ MedicalOcrPipeline 创建成功")
-    except Exception as e:
-        print(f"   ❌ Pipeline 创建失败: {e}")
-        return
-
-    # 4. 启动 Pipeline
-    print("\n4. 启动 Pipeline...")
-    try:
-        pipeline.start()
-        print("   ✅ Pipeline 启动成功")
-    except Exception as e:
-        print(f"   ⚠️  Pipeline 启动失败: {e}")
-        print("   提示: 这通常是因为模型文件未找到，可以继续看示例用法")
-
-    # 5. 使用说明
+        print(f"   Processing error: {e}")
+    
+    # 6. Stop pipeline
+    print("\n6. Stopping pipeline...")
+    pipeline.stop()
+    print("   ✅ Pipeline stopped")
+    
     print("\n" + "=" * 70)
-    print("使用说明")
+    print("Example complete!")
     print("=" * 70)
-    print("""
-MedicalOcrPipeline 继承自 glmocr.Pipeline，用法完全相同，只是增加了医疗文档预处理:
 
-基本用法:
-    # 1. 加载图片
-    request_data = {
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": "/path/to/medical/doc.jpg"}
-                    }
-                ]
-            }
-        ]
-    }
 
-    # 2. 处理（会自动应用预处理）
-    for result in pipeline.process(request_data):
-        print(result.json_result)
-        print(result.markdown_result)
-
-预处理流程 (自动执行):
-    1. YOLO 文档检测 -> 裁剪
-    2. RapidOCR 方向检测 -> 旋转
-    3. UVDoc 畸变矫正 -> 平坦化
-
-注意事项:
-    - 首次调用会自动初始化模型（懒加载）
-    - 无需修改现有代码，直接替换为 MedicalOcrPipeline 即可
-    """)
-
-    # 6. 停止
-    print("\n6. 停止 Pipeline...")
-    try:
-        pipeline.stop()
-        print("   ✅ Pipeline 已停止")
-    except Exception as e:
-        print(f"   ⚠️  停止失败: {e}")
-
+def with_cache():
+    """Example with caching."""
+    
     print("\n" + "=" * 70)
-    print("示例完成！")
+    print("Medical OCR - Caching Example")
     print("=" * 70)
+    
+    # Create cache
+    cache = SimpleCache(max_size=1000, ttl=3600)
+    
+    # Simulate request
+    request_data = {"images": ["test.jpg"]}
+    
+    # First request (cache miss)
+    print("\n1. First request (cache miss)...")
+    result = cache.get(request_data)
+    if result is None:
+        print("   Cache miss - processing...")
+        result = {"text": "Medical record content"}
+        cache.set(request_data, result)
+        print("   Result cached")
+    
+    # Second request (cache hit)
+    print("\n2. Second request (cache hit)...")
+    result = cache.get(request_data)
+    if result is not None:
+        print("   Cache hit - using cached result!")
+    
+    # Print cache stats
+    print("\n3. Cache statistics:")
+    stats = cache.stats()
+    for key, value in stats.items():
+        print(f"   {key}: {value}")
+    
+    print("\n" + "=" * 70)
 
 
 if __name__ == "__main__":
-    main()
+    basic_usage()
+    with_cache()
