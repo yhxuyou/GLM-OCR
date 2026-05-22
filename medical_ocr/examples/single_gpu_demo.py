@@ -17,7 +17,7 @@ from typing import List, Dict, Any
 # Add project path
 sys.path.insert(0, '/workspace/medical_ocr')
 
-from medical_ocr.pipeline_pool_v2 import create_pipeline_pool
+from medical_ocr.pipeline_pool import create_pipeline_pool
 from glmocr.config import load_config
 from glmocr.utils.logging import get_logger
 

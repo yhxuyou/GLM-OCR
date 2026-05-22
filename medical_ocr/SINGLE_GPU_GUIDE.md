@@ -32,7 +32,7 @@ GPU 调度器：多个线程共享 GPU 时间片
 ### 1. 单 GPU，多个 Pipeline
 
 ```python
-from medical_ocr.pipeline_pool_v2 import create_pipeline_pool
+from medical_ocr.pipeline_pool import create_pipeline_pool
 
 # 创建 4 个 Pipeline，都在 GPU 0 上
 pool = create_pipeline_pool(
@@ -156,7 +156,7 @@ if torch.cuda.is_available():
 
 | 文件 | 说明 |
 |------|------|
-| `pipeline_pool_v2.py` | 核心实现（单/多 GPU 都支持）|
+| `pipeline_pool.py` | 核心实现（单/多 GPU 都支持）|
 | `examples/single_gpu_demo.py` | 单 GPU 使用示例 |
 | `medical_ocr/high_perf_server_v2.py` | 服务器示例 |
 

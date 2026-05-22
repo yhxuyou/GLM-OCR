@@ -19,11 +19,12 @@ pip install flask opencv-python numpy
 ### 3. 启动服务器
 
 ```bash
-# 方法 A：直接运行 server.py（需要先设置 Python 路径）
+# 直接运行服务器
 cd /workspace/medical_ocr
-python -m medical_ocr.server
+python -m medical_ocr.high_perf_server
 
-# 方法 B：或者稍后我们可以创建一个简单的启动脚本
+# 或使用启动脚本
+./start_server.sh dev
 ```
 
 ### 4. 测试 API
@@ -39,7 +40,7 @@ curl http://localhost:8080/health
 |------|------|
 | `medical_ocr/pipeline.py` | 继承自 glmocr.Pipeline，添加预处理/后处理 |
 | `medical_ocr/layout_detector.py` | 继承自 glmocr.PPDocLayoutDetector，优化医疗文档检测 |
-| `medical_ocr/server.py` | Flask 服务器，提供 REST API |
+| `medical_ocr/high_perf_server.py` | 高性能 Flask 服务器，提供 REST API |
 | `examples/basic_usage.py` | 基础使用示例 |
 | `run_tests.py` | 项目结构测试脚本（无需安装） |
 

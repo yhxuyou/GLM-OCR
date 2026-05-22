@@ -28,7 +28,7 @@ def main():
         (project_root / "medical_ocr" / "__init__.py", "包初始化文件"),
         (project_root / "medical_ocr" / "pipeline.py", "Pipeline 类"),
         (project_root / "medical_ocr" / "layout_detector.py", "布局检测器"),
-        (project_root / "medical_ocr" / "server.py", "服务器文件"),
+        (project_root / "medical_ocr" / "high_perf_server.py", "服务器文件"),
         (project_root / "examples" / "basic_usage.py", "示例代码"),
         (project_root / "tests" / "__init__.py", "测试文件"),
     ]

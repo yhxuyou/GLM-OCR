@@ -115,7 +115,7 @@ def demo_create_pipeline_pool():
     config = load_medical_config()
     
     # Import our pool
-    from medical_ocr.pipeline_pool_v2 import create_pipeline_pool
+    from medical_ocr.pipeline_pool import create_pipeline_pool
     
     # Extract settings from config
     mode = config.pipeline_pool.mode

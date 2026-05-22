@@ -121,7 +121,7 @@ class SimpleCache:
                 # Simple LRU: remove oldest
                 oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k][0])
                 del self._cache[oldest_key]
-            self._cache[key] = (time.time(), result
+            self._cache[key] = (time.time(), result)
     
     def stats(self) -> Dict[str, int]:
         """Get cache statistics."""

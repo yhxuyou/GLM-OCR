@@ -51,4 +51,4 @@ Documentation = "https://github.com/your-org/medical-ocr"
 Issues = "https://github.com/your-org/medical-ocr/issues"
 
 [project.scripts]
-medical-ocr-server = "medical_ocr.server:main"
+medical-ocr-server = "medical_ocr.high_perf_server:main"
