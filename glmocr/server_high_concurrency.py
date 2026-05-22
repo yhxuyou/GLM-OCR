@@ -426,11 +426,16 @@ class PipelinePool:
 # ---------------------------------------------------------------------------
 
 
-def create_high_concurrency_app(config: GlmOcrConfig) -> Flask:
+def create_high_concurrency_app(
+    config: GlmOcrConfig,
+    pool_size: Optional[int] = None,
+) -> Flask:
     """Create a high-concurrency Flask app backed by a ``PipelinePool``.
 
     Args:
         config: Fully-resolved ``GlmOcrConfig``.
+        pool_size: Number of pipeline worker processes. Auto-detected when
+            ``None`` (default: ``min(2, cpu_count // 2)``).
 
     Returns:
         Flask application instance.
@@ -443,7 +448,6 @@ def create_high_concurrency_app(config: GlmOcrConfig) -> Flask:
 
     app = Flask(__name__)
 
-    pool_size = config.server.pool_size
     if pool_size is None:
         pool_size = _default_pool_size()
     pool_size = max(1, int(pool_size))
@@ -546,10 +550,8 @@ def main():
         configure_logging(level=log_level)
 
         if args.pool_size is not None:
-            config.server.pool_size = args.pool_size
-
-        pool_size = config.server.pool_size
-        if pool_size is None:
+            pool_size = args.pool_size
+        else:
             pool_size = _default_pool_size()
         pool_size = max(1, int(pool_size))
 
@@ -564,7 +566,7 @@ def main():
         logger.info("=" * 60)
         logger.info("")
 
-        app = create_high_concurrency_app(config)
+        app = create_high_concurrency_app(config, pool_size=pool_size)
         pool = app.config["pool"]
 
         app.run(

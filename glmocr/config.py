@@ -64,7 +64,6 @@ class ServerConfig(_BaseConfig):
     host: str = "0.0.0.0"
     port: int = 5002
     debug: bool = False
-    pool_size: Optional[int] = None
 
 
 class LoggingConfig(_BaseConfig):
