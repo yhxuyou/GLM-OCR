@@ -1,0 +1,241 @@
+version: "3.9"
+
+x-common-env: &common-env
+  TZ: Asia/Shanghai
+  PYTHONUNBUFFERED: "1"
+  GLMOCR_LOG_LEVEL: INFO
+
+services:
+  # ============================================================
+  # 基础设施层
+  # ============================================================
+
+  redis:
+    image: redis:7.2-alpine
+    command: redis-server --appendonly yes --maxmemory 4gb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - glm-ocr-net
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: glmocr
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-glmocr_pass}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - glm-ocr-net
+
+  # ============================================================
+  # VLM 推理层 (vLLM 服务 GLM-OCR 模型)
+  # ============================================================
+
+  vllm-server:
+    image: vllm/vllm-openai:latest
+    command:
+      - "--model"
+      - "${VLLM_MODEL_PATH:-THUDM/glm-ocr}"
+      - "--served-model-name"
+      - "glm-ocr"
+      - "--gpu-memory-utilization"
+      - "0.90"
+      - "--max-model-len"
+      - "8192"
+      - "--trust-remote-code"
+      - "--port"
+      - "8000"
+      - "--enable-chunked-prefill"
+      - "true"
+    ports:
+      - "8000:8000"
+    environment:
+      CUDA_VISIBLE_DEVICES: "0"
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+    networks:
+      - glm-ocr-net
+    profiles:
+      - full
+      - gpu
+
+  # ============================================================
+  # Pipeline 服务层 (GLM-OCR SDK 生产服务)
+  # ============================================================
+
+  glmocr-pipeline:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/glmocr-pipeline.Dockerfile
+    ports:
+      - "5002:5002"
+    environment:
+      <<: *common-env
+      GLMOCR_MODE: selfhosted
+      GLMOCR_OCR_API_HOST: vllm-server
+      GLMOCR_OCR_API_PORT: "8000"
+      GLMOCR_OCR_API_MODEL: glm-ocr
+      GLMOCR_LAYOUT_CUDA_VISIBLE_DEVICES: "0"
+      GLMOCR_PIPELINE_MAX_WORKERS: "32"
+      GLMOCR_PIPELINE_PAGE_MAXSIZE: "200"
+      GLMOCR_PIPELINE_REGION_MAXSIZE: "2000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - glm-ocr-net
+    profiles:
+      - full
+      - gpu
+
+  # ============================================================
+  # 应用服务层 (后端编排服务)
+  # ============================================================
+
+  glmocr-backend:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/glmocr-backend.Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      <<: *common-env
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8001"
+      APP_DEBUG: "false"
+      LAYOUT_OCR_URL: "http://glmocr-pipeline:5002/glmocr/parse"
+      REDIS_URL: "redis://redis:6379/0"
+      RABBITMQ_URL: "amqp://glmocr:${RABBITMQ_PASSWORD:-glmocr_pass}@rabbitmq:5672/"
+      DATABASE_URL: "sqlite+aiosqlite:///data/glmocr.db"
+    volumes:
+      - backend-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - glm-ocr-net
+
+  # ============================================================
+  # 任务 Worker (异步处理 OCR 任务)
+  # ============================================================
+
+  glmocr-worker:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/glmocr-backend.Dockerfile
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *common-env
+      LAYOUT_OCR_URL: "http://glmocr-pipeline:5002/glmocr/parse"
+      REDIS_URL: "redis://redis:6379/0"
+      RABBITMQ_URL: "amqp://glmocr:${RABBITMQ_PASSWORD:-glmocr_pass}@rabbitmq:5672/"
+      DATABASE_URL: "sqlite+aiosqlite:///data/glmocr.db"
+    volumes:
+      - worker-data:/app/data
+    deploy:
+      replicas: 3
+    depends_on:
+      - glmocr-backend
+    restart: unless-stopped
+    networks:
+      - glm-ocr-net
+
+  # ============================================================
+  # 可观测性层
+  # ============================================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    restart: unless-stopped
+    networks:
+      - glm-ocr-net
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - ../monitoring/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../monitoring/grafana-datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - glm-ocr-net
+
+volumes:
+  redis-data:
+  rabbitmq-data:
+  backend-data:
+  worker-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  glm-ocr-net:
+    driver: bridge

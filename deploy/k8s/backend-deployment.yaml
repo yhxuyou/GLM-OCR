@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: glmocr-backend
+  namespace: glm-ocr
+  labels:
+    app: glmocr-backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: glmocr-backend
+  template:
+    metadata:
+      labels:
+        app: glmocr-backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - glmocr-backend
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: backend
+          image: your-registry/glmocr-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8001
+              name: http
+              protocol: TCP
+          env:
+            - name: APP_HOST
+              value: "0.0.0.0"
+            - name: APP_PORT
+              value: "8001"
+            - name: APP_DEBUG
+              value: "false"
+            - name: LAYOUT_OCR_URL
+              value: "http://glmocr-pipeline.glm-ocr.svc.cluster.local:5002/glmocr/parse"
+            - name: REDIS_URL
+              value: "redis://redis.glm-ocr.svc.cluster.local:6379/0"
+            - name: DATABASE_URL
+              value: "sqlite+aiosqlite:///data/glmocr.db"
+            - name: LOG_LEVEL
+              value: "INFO"
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8001
+            periodSeconds: 15
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: glmocr-backend-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: glmocr-backend
+  namespace: glm-ocr
+  labels:
+    app: glmocr-backend
+spec:
+  selector:
+    app: glmocr-backend
+  ports:
+    - name: http
+      port: 8001
+      targetPort: 8001
+      protocol: TCP
+  type: ClusterIP

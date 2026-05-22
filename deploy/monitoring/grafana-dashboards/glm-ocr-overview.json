@@ -1,0 +1,85 @@
+{
+  "__inputs": [],
+  "__requires": [],
+  "title": "GLM-OCR Production Overview",
+  "version": 1,
+  "panels": [
+    {
+      "title": "OCR Request Rate",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(glmocr_requests_total[5m])) by (endpoint, status)",
+          "legendFormat": "{{endpoint}} - {{status}}"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+    },
+    {
+      "title": "Request Duration (P95)",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(glmocr_request_duration_seconds_bucket[5m])) by (le, endpoint))",
+          "legendFormat": "P95 - {{endpoint}}"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+    },
+    {
+      "title": "Requests In Flight",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "glmocr_requests_inflight",
+          "legendFormat": "inflight"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+    },
+    {
+      "title": "Queue Depth",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "glmocr_queue_depth",
+          "legendFormat": "{{queue_name}}"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+    },
+    {
+      "title": "Error Rate",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(glmocr_requests_total{status=\"error\"}[5m])) / sum(rate(glmocr_requests_total[5m])) * 100",
+          "legendFormat": "error rate %"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+    },
+    {
+      "title": "GPU Memory Usage",
+      "type": "graph",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "glmocr_gpu_memory_bytes / 1024 / 1024 / 1024",
+          "legendFormat": "GPU {{device}} GiB"
+        }
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+    }
+  ],
+  "schemaVersion": 27,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  }
+}

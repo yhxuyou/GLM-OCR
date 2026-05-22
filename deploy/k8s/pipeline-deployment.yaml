@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: glmocr-pipeline
+  namespace: glm-ocr
+  labels:
+    app: glmocr-pipeline
+spec:
+  replicas: 2
+  serviceName: glmocr-pipeline
+  selector:
+    matchLabels:
+      app: glmocr-pipeline
+  template:
+    metadata:
+      labels:
+        app: glmocr-pipeline
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5002"
+        prometheus.io/path: "/metrics"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - glmocr-pipeline
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: pipeline
+          image: your-registry/glmocr-pipeline:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5002
+              name: http
+              protocol: TCP
+          env:
+            - name: GLMOCR_MODE
+              value: "selfhosted"
+            - name: GLMOCR_OCR_API_HOST
+              value: "vllm-server.glm-ocr.svc.cluster.local"
+            - name: GLMOCR_OCR_API_PORT
+              value: "8000"
+            - name: GLMOCR_OCR_API_MODEL
+              value: "glm-ocr"
+            - name: GLMOCR_PIPELINE_MAX_WORKERS
+              value: "32"
+            - name: GLMOCR_PIPELINE_PAGE_MAXSIZE
+              value: "200"
+            - name: GLMOCR_PIPELINE_REGION_MAXSIZE
+              value: "2000"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              cpu: "4"
+              memory: "16Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "8"
+              memory: "32Gi"
+              nvidia.com/gpu: "1"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5002
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 5002
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5002
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 12
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: glmocr-pipeline
+  namespace: glm-ocr
+  labels:
+    app: glmocr-pipeline
+spec:
+  selector:
+    app: glmocr-pipeline
+  ports:
+    - name: http
+      port: 5002
+      targetPort: 5002
+      protocol: TCP
+  type: ClusterIP
