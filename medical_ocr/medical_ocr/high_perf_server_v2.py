@@ -25,13 +25,12 @@ import uuid
 import json
 import hashlib
 import threading
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 # Add project path
@@ -39,8 +38,6 @@ sys.path.insert(0, '/workspace/medical_ocr')
 
 # Import our pipeline pool
 from medical_ocr.pipeline_pool import PipelinePool, PipelinePoolConfig, create_pipeline_pool
-from medical_ocr.page_loader import MedicalPageLoader
-from medical_ocr.layout_detector import MedicalLayoutDetector
 from glmocr.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -154,6 +151,7 @@ async def lifespan(app: FastAPI):
         
         pool_size = int(os.getenv("POOL_SIZE", "4"))
         use_gpu = os.getenv("USE_GPU", "true").lower() == "true"
+        use_processes = os.getenv("USE_PROCESSES", "true").lower() == "true"
         
         # Parse GPU IDs if specified
         gpu_ids_str = os.getenv("GPU_IDS", None)
@@ -166,7 +164,7 @@ async def lifespan(app: FastAPI):
             pool_size=pool_size,
             yolo_model_dir=os.getenv("YOLO_MODEL_DIR", None),
             uvdoc_model_dir=os.getenv("UVDOC_MODEL_DIR", None),
-            use_processes=True,  # Use ProcessPool for GPU isolation
+            use_processes=use_processes,
             use_gpu=use_gpu,
             gpu_ids=gpu_ids
         )
@@ -285,6 +283,11 @@ async def parse_document(request: OCRRequest):
         # Submit to pool
         result = pipeline_pool.process(request_data)
         
+        # Check if worker returned an error
+        if isinstance(result, dict) and 'error' in result:
+            logger.error(f"Worker error: {result['error']}")
+            raise HTTPException(status_code=500, detail=result['error'])
+        
         # Extract first result
         if result and isinstance(result, list) and len(result) > 0:
             single_result = result[0]
@@ -305,13 +308,7 @@ async def parse_document(request: OCRRequest):
             )
         
         # Fallback
-        return OCRResponse(
-            request_id=request_id,
-            json_result=None,
-            markdown_result=None,
-            processing_time=time.time() - start_time,
-            cached=False
-        )
+        raise HTTPException(status_code=500, detail="Pipeline returned empty result")
         
     except Exception as e:
         logger.error(f"OCR processing failed: {e}")
@@ -354,7 +351,7 @@ async def parse_batch(request: OCRBatchRequest):
             "batch_id": str(uuid.uuid4()),
             "results": results,
             "total_time": total_time,
-            "request_count": len(requests)
+            "request_count": len(request.requests)
         }
         
     except Exception as e:
@@ -388,8 +385,7 @@ if __name__ == "__main__":
         "medical_ocr.high_perf_server_v2:app",
         host="0.0.0.0",
         port=8080,
-        workers=4,  # Note: Each worker will have its own pool!
-        # Recommendation: Set workers=1 and let PipelinePool handle parallelism
+        workers=1,
         limit_concurrency=100,
         access_log=True
     )

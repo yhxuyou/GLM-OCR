@@ -54,6 +54,7 @@ class PipelinePoolConfig:
     uvdoc_model_dir: Optional[str] = None
 
     # GPU settings
+    use_gpu: bool = False
     gpu_device_id: int = 0
     gpu_device_ids: Optional[List[int]] = None
     gpu_memory_fraction: Optional[float] = None
@@ -404,6 +405,7 @@ def create_pipeline_pool(
         pool_size=pool_size,
         yolo_model_dir=yolo_model_dir,
         uvdoc_model_dir=uvdoc_model_dir,
+        use_gpu=use_gpu,
         gpu_device_id=gpu_device_id,
         gpu_device_ids=gpu_ids,
         gpu_memory_fraction=gpu_memory_fraction
