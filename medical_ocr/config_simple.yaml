@@ -1,0 +1,62 @@
+# Medical OCR Configuration (SIMPLE VERSION)
+#
+# Quick start config for most use cases.
+# For full options, see config.yaml.
+
+# ============================================================================
+# Fast Settings
+# ============================================================================
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+logging:
+  level: INFO
+
+# ============================================================================
+# MaaS Mode (Recommended for Quick Start)
+# ============================================================================
+pipeline:
+  maas:
+    enabled: true
+    api_key: "your-api-key-here"  # ⭐ Set your API key
+    model: glm-ocr
+
+  # ==========================================================================
+  # Medical OCR Settings (Enable Features)
+  # ==========================================================================
+  medical_page_loader:
+    enable_preprocessing: true
+    
+    # YOLO (Document Detection) - uncomment if you have the model
+    # yolo_model_dir: "/path/to/your/yolo/model"
+    # yolo_confidence_threshold: 0.5
+    
+    # RapidOCR (Orientation Correction)
+    rapidocr_enabled: true
+    
+    # UVDoc (Distortion Correction) - uncomment if you have the model
+    # uvdoc_model_dir: "/path/to/your/uvdoc/model"
+
+  medical_layout_detector:
+    enable_medical_filter: true
+
+  medical_result_formatter:
+    enable_coordinate_extraction: true
+
+# ============================================================================
+# High Performance Pool (Single GPU)
+# ============================================================================
+pipeline_pool:
+  mode: single_gpu
+  pool_size: 4
+  single_gpu:
+    gpu_device_id: 0
+
+# ============================================================================
+# Cache Settings
+# ============================================================================
+cache:
+  in_memory:
+    enabled: true
+    ttl_seconds: 3600
