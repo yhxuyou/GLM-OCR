@@ -7,6 +7,31 @@ x-common-env: &common-env
 
 services:
   # ============================================================
+  # 网关层 (Nginx 入口)
+  # ============================================================
+
+  nginx:
+    image: nginx:1.26-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/ssl:/etc/nginx/ssl:ro
+      - nginx-logs:/var/log/nginx
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      - glmocr-backend
+      - glmocr-pipeline
+    restart: unless-stopped
+    networks:
+      - glm-ocr-net
+
+  # ============================================================
   # 基础设施层
   # ============================================================
 
@@ -98,8 +123,8 @@ services:
     build:
       context: ../../
       dockerfile: deploy/docker/glmocr-pipeline.Dockerfile
-    ports:
-      - "5002:5002"
+    expose:
+      - "5002"
     environment:
       <<: *common-env
       GLMOCR_MODE: selfhosted
@@ -141,8 +166,8 @@ services:
     build:
       context: ../../
       dockerfile: deploy/docker/glmocr-backend.Dockerfile
-    ports:
-      - "8001:8001"
+    expose:
+      - "8001"
     environment:
       <<: *common-env
       APP_HOST: "0.0.0.0"
@@ -235,6 +260,7 @@ volumes:
   worker-data:
   prometheus-data:
   grafana-data:
+  nginx-logs:
 
 networks:
   glm-ocr-net:

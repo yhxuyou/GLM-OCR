@@ -1,0 +1,148 @@
+# vLLM GLM-OCR 生产配置指南
+# ============================================================
+# 本文档包含 GLM-OCR 在 vLLM 上的完整生产配置参数说明。
+# 所有参数均可通过 vllm-serve.sh 脚本的 CLI 参数或环境变量设置。
+
+# ── 模型加载参数 ──────────────────────────────────────────────────────
+
+# 模型路径 (HF Hub ID 或本地路径)
+# 支持的格式:
+#   - HuggingFace: THUDM/glm-ocr
+#   - 本地量化:   /data/models/glm-ocr-awq
+#   - S3/GCS:     s3://bucket/models/glm-ocr (需要 s5cmd)
+model: THUDM/glm-ocr
+
+# 服务对外暴露的模型名称
+served_model_name: glm-ocr
+
+# 是否需要 trust_remote_code (GLM 架构需要)
+trust_remote_code: true
+
+# ── GPU 配置 ──────────────────────────────────────────────────────────
+
+# CUDA 可见设备 (用于单机多卡部署)
+# 单卡:       "0"
+# 双卡 TP:    "0,1"
+# 四卡 TP:    "0,1,2,3"
+cuda_visible_devices: "0"
+
+# 张量并行度 (Tensor Parallelism)
+#   TP=1: 单卡推理 (适用于 A100-80G)
+#   TP=2: 双卡分片 (适用于 A100-40G 或高并发)
+#   TP=4: 四卡分片 (适用于 V100-32G)
+#   TP=8: 八卡分片 (全节点)
+tensor_parallel_size: 1
+
+# 流水线并行度 (Pipeline Parallelism)
+#   通常保持 PP=1, 仅在跨节点时使用
+pipeline_parallel_size: 1
+
+# ── 显存管理 ──────────────────────────────────────────────────────────
+
+# GPU 显存利用率 (0.0 ~ 1.0)
+#   0.90:  推荐值, 留出 10% 给 CUDA kernel 和数据处理
+#   0.95:  激进值, 适合只有单模型的服务
+#   0.80:  保守值, 适合需要运行其他 GPU 程序
+gpu_memory_utilization: 0.90
+
+# 模型精度
+#   auto:     自动选择 (推荐)
+#   half:     半精度 FP16 (推荐)
+#   bfloat16: BF16 (适合 A100/H100)
+#   float16:  FP16
+dtype: auto
+
+# 量化方案 (推荐: awq)
+#   "":    不量化 (FP16, 约 1.8 GB 显存)
+#   "awq": AWQ 量化 (推荐, INT4 约 0.5 GB, 精度损失 < 0.5%)
+#   "gptq":GPTQ 量化 (INT4 约 0.5 GB)
+#   "fp8": FP8 量化 (仅 H100/H200 支持)
+quantization: ""
+
+# ── 推理性能 ──────────────────────────────────────────────────────────
+
+# 最大模型长度 (token 数)
+#   GLM-OCR 推荐值: 8192
+#   对长文档可增加到 16384 (需更多显存)
+max_model_len: 8192
+
+# 最大并发序列数 (同时处理的请求数)
+#   256:   高并发场景 (推荐, 充分利用 Continuous Batching)
+#   512:   极致吞吐 (需注意 OOM)
+#   64:    低延迟场景 (减少排队)
+max_num_seqs: 256
+
+# 最大批处理 token 数 (影响每次前向传播的 token 总数)
+#   公式: max_model_len * 2
+#   可手动调节: 16384, 32768
+max_num_batched_tokens: 16384
+
+# 调度策略
+#   async: 异步调度 + Chunked Prefill (推荐, 吞吐更高)
+#   sync:  同步调度 (vLLM 默认, 延迟更低)
+scheduling: async
+
+# Chunked Prefill (仅在 async 调度下生效)
+# 将长 prompt 分块处理, 避免 Block LLM 问题
+enable_chunked_prefill: true
+
+# Scheduler steps per iteration (增加可提高吞吐)
+num_scheduler_steps: 8
+
+# ── 显存优化 ──────────────────────────────────────────────────────────
+
+# 启用 eager 模式 (禁用 CUDA graph)
+#   true:  兼容性好, 启动快, 但吞吐略低
+#   false: 使用 CUDA graph, 吞吐更高, 但需额外显存
+enforce_eager: true
+
+# KV Cache 类型
+#   auto: 自动选择
+#   fp8:  FP8 KV Cache (H100 支持, 减少 50% KV Cache 显存)
+kv_cache_dtype: auto
+
+# ── 服务配置 ──────────────────────────────────────────────────────────
+
+# 监听地址
+host: 0.0.0.0
+
+# 监听端口
+port: 8000
+
+# API key 认证 (可选)
+# api_key: "sk-your-api-key"
+
+# 根路径 (如果前面有反向代理)
+# root_path: "/vllm"
+
+# ── 日志配置 ──────────────────────────────────────────────────────────
+
+# 日志级别
+#   DEBUG:  调试模式 (打印每次请求详情)
+#   INFO:   正常模式 (推荐)
+#   WARNING:仅警告和错误
+log_level: info
+
+# ── 关于 GLM-OCR 模型的特殊说明 ──────────────────────────────────────
+#
+# 1. 架构: GLM-OCR 基于 GLM-4V 架构, 约 0.9B 参数
+# 2. 显存需求 (FP16): ~1.8 GB (模型权重) + ~2 GB (KV Cache) ≈ 4 GB
+# 3. 推荐 GPU: T4-16G / V100-32G / A100-40/80G
+# 4. 量化后 (AWQ INT4): 模型权重降至 ~0.5 GB, 总显存需求约 2 GB
+# 5. 即使 T4-16G 也能轻松运行高并发负载
+#
+# vLLM 启动命令参考:
+#   # FP16 模式 (单卡 A100-80G)
+#   python -m vllm.entrypoints.openai.api_server \
+#     --model THUDM/glm-ocr \
+#     --trust-remote-code \
+#     --gpu-memory-utilization 0.90 \
+#     --max-num-seqs 256
+#
+#   # AWQ 量化模式 (单卡 T4-16G)
+#   python -m vllm.entrypoints.openai.api_server \
+#     --model ./quantized/glm-ocr-awq \
+#     --trust-remote-code \
+#     --quantization awq \
+#     --gpu-memory-utilization 0.95 \
+#     --max-num-seqs 512
