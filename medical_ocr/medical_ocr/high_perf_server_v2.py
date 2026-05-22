@@ -78,6 +78,9 @@ class PipelinePoolConfig:
 # Worker Helpers (Process-based, for Multi-GPU / CPU)
 # =========================================================================
 
+_worker_pipeline = None
+_worker_config = None
+
 def _pipeline_worker_initializer(config_dict: Dict[str, Any], worker_idx: int, gpu_id: Optional[int]):
     """Initialize pipeline in worker process.
 
