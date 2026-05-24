@@ -9,14 +9,15 @@ _layout_import_error_is_dependency: bool = False
 
 try:
     from .layout_detector import PPDocLayoutDetector
+    from .optimized_layout_detector import OptimizedPPDocLayoutDetector
 except (ModuleNotFoundError, ImportError) as e:  # pragma: no cover
     PPDocLayoutDetector = None  # type: ignore
+    OptimizedPPDocLayoutDetector = None  # type: ignore
     _layout_import_error = e
     _layout_import_error_is_dependency = True
 except Exception as e:  # pragma: no cover
-    # Dependencies may already be installed; importing the detector can still fail
-    # due to version incompatibilities or other runtime errors.
     PPDocLayoutDetector = None  # type: ignore
+    OptimizedPPDocLayoutDetector = None  # type: ignore
     _layout_import_error = e
     _layout_import_error_is_dependency = False
 
@@ -38,4 +39,4 @@ def _raise_layout_import_error() -> None:
     raise ImportError(message) from _layout_import_error
 
 
-__all__ = ["BaseLayoutDetector", "PPDocLayoutDetector"]
+__all__ = ["BaseLayoutDetector", "PPDocLayoutDetector", "OptimizedPPDocLayoutDetector"]

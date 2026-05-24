@@ -1,0 +1,314 @@
+# Medical OCR Configuration
+#
+# This file extends glmocr/config.yaml with medical-specific features.
+# All original glmocr settings are preserved and used.
+
+# ============================================================================
+# Original glmocr Server Settings (Preserved)
+# ============================================================================
+server:
+  host: "0.0.0.0"
+  port: 5002
+  debug: false
+
+# ============================================================================
+# High Performance Server Settings (NEW)
+# ============================================================================
+high_perf_server:
+  # FastAPI server settings
+  fastapi_host: "0.0.0.0"
+  fastapi_port: 8080
+  fastapi_workers: 1  # Recommended: Keep 1, let PipelinePool handle parallelism
+  enable_metrics: true
+  metrics_port: 8001
+
+# ============================================================================
+# Logging Settings (Preserved)
+# ============================================================================
+logging:
+  level: INFO
+
+# ============================================================================
+# Pipeline Settings (Extended)
+# ============================================================================
+pipeline:
+  # ==========================================================================
+  # Original glmocr settings (Preserved)
+  # ==========================================================================
+  
+  maas:
+    enabled: true
+    api_url: https://open.bigmodel.cn/api/paas/v4/layout_parsing
+    model: glm-ocr
+    api_key: null
+    verify_ssl: true
+    connect_timeout: 30
+    request_timeout: 300
+    retry_max_attempts: 2
+    retry_backoff_base_seconds: 0.5
+    retry_backoff_max_seconds: 8.0
+    retry_jitter_ratio: 0.2
+    retry_status_codes: [429, 500, 502, 503, 504]
+    connection_pool_size: 16
+
+  ocr_api:
+    api_host: 127.0.0.1
+    api_port: 8080
+    model: glm-ocr
+    api_scheme: null
+    api_path: /v1/chat/completions
+    api_url: null
+    api_mode: openai
+    api_key: null
+    headers: {}
+    verify_ssl: false
+    connect_timeout: 30
+    request_timeout: 120
+    retry_max_attempts: 2
+    retry_backoff_base_seconds: 0.5
+    retry_backoff_max_seconds: 8.0
+    retry_jitter_ratio: 0.2
+    retry_status_codes: [429, 500, 502, 503, 504]
+    connection_pool_size: 128
+
+  max_workers: 32
+  page_maxsize: 100
+  region_maxsize: 2000
+
+  page_loader:
+    max_tokens: 8192
+    temperature: 0.0
+    top_p: 0.00001
+    top_k: 1
+    repetition_penalty: 1.1
+    t_patch_size: 2
+    patch_expand_factor: 1
+    image_expect_length: 6144
+    image_format: JPEG
+    min_pixels: 12544
+    max_pixels: 71372800
+    task_prompt_mapping:
+      text: "Text Recognition:"
+      table: "Table Recognition:"
+      formula: "Formula Recognition:"
+    pdf_dpi: 200
+    pdf_max_pages: null
+    pdf_verbose: false
+
+  result_formatter:
+    output_format: both
+    enable_merge_formula_numbers: true
+    enable_merge_text_blocks: true
+    enable_format_bullet_points: true
+    label_visualization_mapping:
+      table:
+        - table
+      formula:
+        - display_formula
+        - inline_formula
+      image:
+        - chart
+        - image
+      text:
+        - abstract
+        - algorithm
+        - content
+        - doc_title
+        - figure_title
+        - paragraph_title
+        - reference_content
+        - text
+        - vertical_text
+        - vision_footnote
+        - seal
+        - formula_number
+
+  layout:
+    model_dir: PaddlePaddle/PP-DocLayoutV3_safetensors
+    threshold: 0.3
+    batch_size: 1
+    workers: 1
+    cuda_visible_devices: "0"
+    use_polygon: false
+    layout_nms: true
+    layout_unclip_ratio:
+      - 1.0
+      - 1.0
+    layout_merge_bboxes_mode:
+      0: large
+      1: large
+      2: large
+      3: large
+      4: large
+      5: large
+      6: large
+      7: large
+      8: large
+      9: large
+      10: large
+      11: large
+      12: large
+      13: large
+      14: large
+      15: large
+      16: large
+      17: large
+      18: small
+      19: large
+      20: large
+      21: large
+      22: large
+      23: large
+      24: large
+    label_task_mapping:
+      text:
+        - abstract
+        - algorithm
+        - content
+        - doc_title
+        - figure_title
+        - paragraph_title
+        - reference_content
+        - text
+        - vertical_text
+        - vision_footnote
+        - seal
+        - formula_number
+      table:
+        - table
+      formula:
+        - display_formula
+        - inline_formula
+      skip:
+        - chart
+        - image
+      abandon:
+        - header
+        - footer
+        - number
+        - footnote
+        - aside_text
+        - reference
+        - footer_image
+        - header_image
+    id2label:
+      0: abstract
+      1: algorithm
+      2: aside_text
+      3: chart
+      4: content
+      5: display_formula
+      6: doc_title
+      7: figure_title
+      8: footer
+      9: footer_image
+      10: footnote
+      11: formula_number
+      12: header
+      13: header_image
+      14: image
+      15: inline_formula
+      16: number
+      17: paragraph_title
+      18: reference
+      19: reference_content
+      20: seal
+      21: table
+      22: text
+      23: vertical_text
+      24: vision_footnote
+
+  # ==========================================================================
+  # Medical OCR Specific Settings (NEW)
+  # ==========================================================================
+  
+  # Medical Page Loader (Preprocessing)
+  medical_page_loader:
+    enable_preprocessing: true
+    
+    # YOLO Document Detection
+    yolo_model_dir: null  # e.g., "/path/to/yolo/model"
+    yolo_confidence_threshold: 0.5
+    yolo_nms_threshold: 0.45
+    document_padding: 10
+    
+    # RapidOCR Orientation Correction
+    rapidocr_enabled: true
+    
+    # UVDoc Distortion Correction
+    uvdoc_model_dir: null  # e.g., "/path/to/uvdoc/model"
+    uvdoc_enabled: true
+  
+  # Medical Layout Detector
+  medical_layout_detector:
+    # Filter: only keep tables + full-page text
+    enable_medical_filter: true
+    keep_table_regions: true
+    add_full_page_text_region: true
+  
+  # Medical Result Formatter
+  medical_result_formatter:
+    # RapidOCR for coordinate extraction
+    enable_coordinate_extraction: true
+    rapidocr_model_dir: null  # Auto-detect if null
+
+# ============================================================================
+# Pipeline Pool Settings (NEW - High Performance)
+# ============================================================================
+pipeline_pool:
+  # Pool mode: "single_gpu" or "multi_gpu"
+  mode: single_gpu
+  
+  # Pool size (number of Pipeline instances)
+  pool_size: 4
+  
+  # Single-GPU mode settings
+  single_gpu:
+    gpu_device_id: 0
+    gpu_memory_fraction: null  # null = auto, 0.5 = 50%, 0.9 = 90%
+  
+  # Multi-GPU mode settings
+  multi_gpu:
+    gpu_device_ids: [0, 1]
+  
+  # Queue settings
+  max_queue_size: 100
+
+# ============================================================================
+# Cache Settings (NEW)
+# ============================================================================
+cache:
+  # In-memory cache
+  in_memory:
+    enabled: true
+    max_size: 1000
+    ttl_seconds: 3600  # 1 hour
+  
+  # Redis cache (optional)
+  redis:
+    enabled: false
+    host: "127.0.0.1"
+    port: 6379
+    db: 0
+    ttl_seconds: 3600
+
+# ============================================================================
+# Environment Variable Overrides (Reference)
+# ============================================================================
+#
+# You can also set these via environment variables (take precedence):
+#
+# High Performance Server:
+#   POOL_SIZE=4
+#   USE_GPU=true
+#   GPU_IDS=0,1
+#   YOLO_MODEL_DIR=/path/to/yolo
+#   UVDOC_MODEL_DIR=/path/to/uvdoc
+#
+# Cache:
+#   REDIS_HOST=localhost
+#   REDIS_PORT=6379
+#
+# Original glmocr:
+#   ZHIPU_API_KEY=...
+#   GLMOCR_LAYOUT_DEVICE=cuda
