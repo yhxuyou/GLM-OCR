@@ -4,12 +4,13 @@ Three-stage async document parsing pipeline.  ``process()`` yields one
 ``PipelineResult`` per input unit (one image or one PDF).
 
 Stages (all always enabled):
-  1. PageLoader   — load images / PDF pages
-  2. LayoutDetector — detect regions per page
-  3. OCRClient    — recognise each region via VLM
+  0. PreprocessStage — document detection, orientation, dewarping (optional, GPU)
+  1. PageLoader       — load images / PDF pages
+  2. LayoutDetector   — detect regions per page
+  3. OCRClient        — recognise each region via VLM
 
 Extension points:
-  * Pass a custom ``layout_detector`` or ``result_formatter`` to the constructor.
+  * Pass a custom ``layout_detector``, ``preprocess_stage``, or ``result_formatter`` to the constructor.
   * Subclass ``Pipeline`` and override ``process()``.
 """
 
@@ -41,6 +42,7 @@ from glmocr.pipeline._unit_tracker import UnitTracker
 if TYPE_CHECKING:
     from glmocr.config import PipelineConfig
     from glmocr.layout.base import BaseLayoutDetector
+    from glmocr.preprocess import PreprocessStage
 
 logger = get_logger(__name__)
 
@@ -49,6 +51,7 @@ class Pipeline:
     """GLM-OCR pipeline.
 
     Processing flow:
+      0. PreprocessStage:  document detection → orientation → dewarp (optional, GPU)
       1. PageLoader:      load images / PDF into pages
       2. LayoutDetector:  detect regions
       3. OCRClient:       call OCR service
@@ -57,6 +60,9 @@ class Pipeline:
     Args:
         config: PipelineConfig instance.
         layout_detector: Custom layout detector (optional).
+        preprocess_stage: Custom preprocess orchestrator (optional).
+            If ``None`` and any preprocessor is enabled in config, a
+            default ``PreprocessStage`` is created.
         result_formatter: Custom result formatter (optional).
 
     Example::
@@ -73,6 +79,7 @@ class Pipeline:
         self,
         config: "PipelineConfig",
         layout_detector: Optional["BaseLayoutDetector"] = None,
+        preprocess_stage: Optional["PreprocessStage"] = None,
         result_formatter: Optional[ResultFormatter] = None,
     ):
         self.config = config
@@ -83,6 +90,13 @@ class Pipeline:
             if result_formatter is not None
             else ResultFormatter(config.result_formatter)
         )
+
+        if preprocess_stage is not None:
+            self.preprocess = preprocess_stage
+        else:
+            from glmocr.preprocess import PreprocessStage
+
+            self.preprocess = PreprocessStage(config)
 
         if layout_detector is not None:
             self.layout_detector = layout_detector
@@ -159,6 +173,7 @@ class Pipeline:
                 save_layout_visualization,
                 self.config.layout.use_polygon,
             ),
+            kwargs={"preprocess_stage": self.preprocess},
             daemon=True,
         )
         t3 = threading.Thread(
@@ -209,8 +224,9 @@ class Pipeline:
     # ------------------------------------------------------------------
 
     def start(self):
-        """Start the pipeline (layout detector + OCR client)."""
+        """Start the pipeline (preprocess stage + layout detector + OCR client)."""
         logger.info("Starting Pipeline...")
+        self.preprocess.start()
         self.layout_detector.start()
         self.ocr_client.start()
         logger.info("Pipeline started!")
@@ -220,6 +236,7 @@ class Pipeline:
         logger.info("Stopping Pipeline...")
         self.ocr_client.stop()
         self.layout_detector.stop()
+        self.preprocess.stop()
         logger.info("Pipeline stopped!")
 
     def __enter__(self):

@@ -26,6 +26,8 @@ import queue
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import numpy as np
+
 from glmocr.pipeline._common import (
     IDENTIFIER_DONE,
     IDENTIFIER_IMAGE,
@@ -39,6 +41,7 @@ from glmocr.utils.logging import get_logger
 if TYPE_CHECKING:
     from glmocr.dataloader import PageLoader
     from glmocr.layout.base import BaseLayoutDetector
+    from glmocr.preprocess import PreprocessStage
 
 logger = get_logger(__name__)
 
@@ -149,8 +152,15 @@ def layout_worker(
     layout_detector: "BaseLayoutDetector",
     save_visualization: bool,
     use_polygon: bool = False,
+    preprocess_stage: Optional["PreprocessStage"] = None,
 ) -> None:
-    """Consume pages, run layout detection in batches, push regions.
+    """Consume pages, run preprocessing + layout detection, push regions.
+
+    When ``preprocess_stage`` is provided and has any enabled steps,
+    each batch of PIL images is first passed through the preprocessing
+    pipeline (document detection → orientation → dewarp) **before**
+    layout detection.  Preprocessed images are numpy arrays that are
+    converted back to PIL for the layout detector.
 
     When a ``IDENTIFIER_UNIT_DONE`` sentinel arrives from Stage 1, the
     current batch is flushed immediately (it contains the last pages for
@@ -195,6 +205,7 @@ def layout_worker(
                         save_visualization,
                         global_start_idx,
                         use_polygon=use_polygon,
+                        preprocess_stage=preprocess_stage,
                     )
                     global_start_idx += len(batch_page_indices)
                     for pi in batch_page_indices:
@@ -212,6 +223,7 @@ def layout_worker(
                         save_visualization,
                         global_start_idx,
                         use_polygon=use_polygon,
+                        preprocess_stage=preprocess_stage,
                     )
                     global_start_idx += len(batch_page_indices)
                     for pi in batch_page_indices:
@@ -240,6 +252,7 @@ def layout_worker(
                         save_visualization,
                         global_start_idx,
                         use_polygon=use_polygon,
+                        preprocess_stage=preprocess_stage,
                     )
                 state.safe_put(state.region_queue, {"identifier": IDENTIFIER_DONE})
                 break
@@ -259,11 +272,30 @@ def _flush_layout_batch(
     save_visualization: bool,
     global_start_idx: int,
     use_polygon: bool = False,
+    preprocess_stage: Optional["PreprocessStage"] = None,
 ) -> None:
-    """Run layout detection on one batch and enqueue the resulting regions."""
+    """Run preprocessing (optional), then layout detection, then enqueue regions."""
+    from PIL import Image
+
+    images_for_layout: List[Any] = list(batch_images)
+
+    if preprocess_stage is not None and preprocess_stage.has_any_enabled():
+        preprocessed: List[Any] = []
+        for img in batch_images:
+            try:
+                arr = np.array(img.convert("RGB"))
+                corrected = preprocess_stage.run(arr)
+                preprocessed.append(Image.fromarray(corrected))
+            except Exception as e:
+                logger.warning(
+                    "Preprocessing failed for a page, using original: %s", e
+                )
+                preprocessed.append(img)
+        images_for_layout = preprocessed
+
     try:
         layout_results, vis_images = layout_detector.process(
-            batch_images,
+            images_for_layout,
             save_visualization=save_visualization,
             global_start_idx=global_start_idx,
             use_polygon=use_polygon,
@@ -281,7 +313,7 @@ def _flush_layout_batch(
         return
 
     for page_idx, image, layout_result in zip(
-        batch_page_indices, batch_images, layout_results
+        batch_page_indices, images_for_layout, layout_results
     ):
         state.layout_results_dict[page_idx] = layout_result
         for region in layout_result:

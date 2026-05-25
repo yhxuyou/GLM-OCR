@@ -256,6 +256,54 @@ class LayoutConfig(_BaseConfig):
         )
 
 
+# ── Preprocessing configs (GPU models, small – all resident) ──────────────
+
+
+class DocDetectionConfig(_BaseConfig):
+    """Document-boundary detection preprocessor.
+
+    Located the document quadrilateral in the image and crops/rectifies
+    it.  Typical model: YOLO-v8n / Rt-DETR-R18 (~3M params, ~6 MB VRAM).
+    """
+
+    enabled: bool = False
+    model_path: Optional[str] = None
+    confidence_threshold: float = 0.5
+    input_size: List[int] = Field(default_factory=lambda: [640, 640])
+    padding: float = 0.02
+    device: Optional[str] = None
+
+
+class OrientationConfig(_BaseConfig):
+    """Orientation correction preprocessor.
+
+    Classifies the image as 0°/90°/180°/270° and rotates to upright.
+    Typical model: ResNet-18 (~11M params, ~22 MB VRAM).
+    """
+
+    enabled: bool = False
+    model_path: Optional[str] = None
+    classes: List[int] = Field(default_factory=lambda: [0, 90, 180, 270])
+    min_confidence: float = 0.8
+    input_size: List[int] = Field(default_factory=lambda: [224, 224])
+    device: Optional[str] = None
+
+
+class DewarpConfig(_BaseConfig):
+    """Dewarping preprocessor.
+
+    Flattens curved/warped document surfaces into a rectified view.
+    Typical model: DocTr / UVDoc (~30M params, ~60 MB VRAM).
+    """
+
+    enabled: bool = False
+    model_path: Optional[str] = None
+    output_size: List[int] = Field(default_factory=lambda: [1024, 1024])
+    input_size: List[int] = Field(default_factory=lambda: [512, 512])
+    skip_threshold: float = 0.1
+    device: Optional[str] = None
+
+
 class PipelineConfig(_BaseConfig):
     # MaaS mode configuration (Zhipu cloud API passthrough)
     maas: MaaSApiConfig = Field(default_factory=MaaSApiConfig)
@@ -266,6 +314,11 @@ class PipelineConfig(_BaseConfig):
         default_factory=ResultFormatterConfig
     )
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
+
+    # Image preprocessing (GPU, all models are small and stay resident)
+    doc_detection: DocDetectionConfig = Field(default_factory=DocDetectionConfig)
+    orientation_correction: OrientationConfig = Field(default_factory=OrientationConfig)
+    dewarp: DewarpConfig = Field(default_factory=DewarpConfig)
 
     # Parallel recognition workers (VLM/API concurrent requests)
     max_workers: int = 16
