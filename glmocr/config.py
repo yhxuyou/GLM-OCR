@@ -66,6 +66,14 @@ class ServerConfig(_BaseConfig):
     debug: bool = False
 
 
+class QueueConfig(_BaseConfig):
+    max_concurrent_pipelines: int = 3
+    max_queue_size: int = 500
+    job_ttl_seconds: int = 1800
+    vlm_max_requests_per_second: Optional[float] = None
+    save_layout_visualization: bool = False
+
+
 class LoggingConfig(_BaseConfig):
     level: str = "INFO"  # DEBUG, INFO, WARNING, ERROR
     format: Optional[str] = None
@@ -363,6 +371,7 @@ class GlmOcrConfig(_BaseConfig):
     server: ServerConfig = Field(default_factory=ServerConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
+    queue: QueueConfig = Field(default_factory=QueueConfig)
 
     @classmethod
     def default_path(cls) -> str:

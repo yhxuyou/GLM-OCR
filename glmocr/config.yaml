@@ -9,6 +9,29 @@ server:
   port: 5002
   debug: false
 
+# Queue settings (for glmocr.server_queue - high-concurrency mode)
+queue:
+  # Maximum number of concurrent pipeline.process() executions.
+  # Each pipeline execution runs layout detection + VLM recognition inside.
+  # Keep this low (2-4) if you have limited GPU/vLLM capacity.
+  max_concurrent_pipelines: 3
+
+  # Maximum number of pending jobs in the queue.
+  # When the queue is full, new requests receive HTTP 503.
+  max_queue_size: 500
+
+  # How long (seconds) to keep completed/failed job results in memory.
+  # After TTL expires, the job record is purged automatically.
+  job_ttl_seconds: 1800
+
+  # VLM backend rate limit (requests per second). null = unlimited.
+  # Set this to protect your vLLM/SGLang backend from being overwhelmed.
+  # Example: 50 means at most 50 VLM requests per second across all pipelines.
+  vlm_max_requests_per_second: null
+
+  # Whether to save layout visualization images (memory-intensive).
+  save_layout_visualization: false
+
 # Logging settings
 logging:
   # Log level: DEBUG, INFO, WARNING, ERROR
