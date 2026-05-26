@@ -72,6 +72,8 @@ class QueueConfig(_BaseConfig):
     job_ttl_seconds: int = 1800
     vlm_max_requests_per_second: Optional[float] = None
     save_layout_visualization: bool = False
+    preprocess_enabled: bool = False
+    preprocess_url: str = "http://localhost:7001"
 
 
 class LoggingConfig(_BaseConfig):

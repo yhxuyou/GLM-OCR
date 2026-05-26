@@ -51,6 +51,14 @@ from glmocr.pipeline import Pipeline
 from glmocr.config import GlmOcrConfig, load_config
 from glmocr.utils.logging import get_logger, configure_logging
 
+try:
+    from preprocess_client import PreprocessClient
+
+    _PREPROCESS_CLIENT_IMPORT_ERROR = None
+except ImportError as e:
+    PreprocessClient = None  # type: ignore
+    _PREPROCESS_CLIENT_IMPORT_ERROR = e
+
 logger = get_logger(__name__)
 
 os.environ["http_proxy"] = ""
@@ -76,6 +84,8 @@ class Job:
     markdown_result: Optional[str] = None
     error_message: Optional[str] = None
     progress: float = 0.0
+    preprocessed_images: List[str] = field(default_factory=list)
+    preprocess_metadata: Optional[Dict[str, Any]] = None
 
 
 def _build_response(json_result, markdown_result):
@@ -216,6 +226,8 @@ class PipelineWorkerPool:
         max_queue_size: int = 500,
         vlm_rate_limit: Optional[float] = None,
         save_layout_visualization: bool = False,
+        preprocess_enabled: bool = False,
+        preprocess_url: str = "http://localhost:7001",
     ):
         self._pipeline = pipeline
         self._job_store = job_store
@@ -227,6 +239,12 @@ class PipelineWorkerPool:
         self._vlm_limiter: Optional[VlmRateLimiter] = None
         if vlm_rate_limit is not None and vlm_rate_limit > 0:
             self._vlm_limiter = VlmRateLimiter(vlm_rate_limit)
+
+        self._preprocess_enabled = preprocess_enabled
+        self._preprocess_url = preprocess_url
+        self._preprocess_client: Optional[PreprocessClient] = None
+        if preprocess_enabled and PreprocessClient:
+            self._preprocess_client = PreprocessClient(preprocess_url)
 
         self._executor = ThreadPoolExecutor(
             max_workers=max_concurrent, thread_name_prefix="pipeline-wkr"
@@ -325,8 +343,52 @@ class PipelineWorkerPool:
         if self._vlm_limiter is not None:
             self._vlm_limiter.acquire()
 
+        images_to_process = job.images.copy()
+        preprocess_metadata = []
+
+        if self._preprocess_enabled and self._preprocess_client:
+            try:
+                preprocessed = []
+                for img_url in job.images:
+                    try:
+                        result = self._preprocess_client.preprocess(img_url, sync=True)
+                        if result.get("document_detected", False) and "corrected_image" in result:
+                            preprocessed.append(result["corrected_image"])
+                            preprocess_metadata.append({
+                                "original_image": img_url,
+                                "orientation_angle": result.get("orientation_angle", 0),
+                                "deskewed_angle": result.get("deskewed_angle", 0.0),
+                                "confidence": result.get("confidence", 0.0),
+                                "document_detected": True,
+                            })
+                        else:
+                            preprocessed.append(img_url)
+                            preprocess_metadata.append({
+                                "original_image": img_url,
+                                "document_detected": False,
+                                "warning": "Document not detected, using original image",
+                            })
+                    except Exception as e:
+                        logger.warning(f"Preprocessing failed for {img_url}: {e}")
+                        preprocessed.append(img_url)
+                        preprocess_metadata.append({
+                            "original_image": img_url,
+                            "document_detected": False,
+                            "warning": f"Preprocessing error: {str(e)}",
+                        })
+                images_to_process = preprocessed
+                self._job_store.update_status(
+                    job.job_id,
+                    JobStatus.PROCESSING,
+                    preprocessed_images=images_to_process,
+                    preprocess_metadata=preprocess_metadata,
+                )
+                logger.info(f"Job {job.job_id}: preprocessed {len(images_to_process)} images")
+            except Exception as e:
+                logger.error(f"Preprocessing pipeline error: {e}")
+
         messages = [{"role": "user", "content": []}]
-        for image_url in job.images:
+        for image_url in images_to_process:
             messages[0]["content"].append(
                 {"type": "image_url", "image_url": {"url": image_url}}
             )
@@ -418,6 +480,8 @@ def create_queue_app(
         max_queue_size=getattr(queue_cfg, "max_queue_size", 500) if queue_cfg else 500,
         vlm_rate_limit=getattr(queue_cfg, "vlm_max_requests_per_second", None) if queue_cfg else None,
         save_layout_visualization=getattr(queue_cfg, "save_layout_visualization", False) if queue_cfg else False,
+        preprocess_enabled=getattr(queue_cfg, "preprocess_enabled", False) if queue_cfg else False,
+        preprocess_url=getattr(queue_cfg, "preprocess_url", "http://localhost:7001") if queue_cfg else "http://localhost:7001",
     )
 
     app.config["pipeline"] = pipeline
