@@ -196,7 +196,7 @@ def layout_worker(
                     unit_page_indices[unit_idx] = []
                 unit_page_indices[unit_idx].append(msg["page_idx"])
 
-                if len(batch_images) >= layout_detector.batch_size:
+                if len(batch_images) >= getattr(layout_detector, "batch_size", 1):
                     _flush_layout_batch(
                         state,
                         layout_detector,
@@ -294,6 +294,28 @@ def _flush_layout_batch(
         images_for_layout = preprocessed
 
     try:
+        if layout_detector is None:
+            for page_idx, image in zip(batch_page_indices, batch_images):
+                full_width, full_height = image.size
+                fake_region = {
+                    "bbox_2d": [0, 0, full_width, full_height],
+                    "label": "full_page",
+                    "polygon": [[0, 0], [full_width, 0], [full_width, full_height], [0, full_height]] if use_polygon else None,
+                    "score": 1.0,
+                    "content": "",
+                }
+                state.layout_results_dict[page_idx] = [fake_region]
+                state.safe_put(
+                    state.region_queue,
+                    {
+                        "identifier": IDENTIFIER_REGION,
+                        "page_idx": page_idx,
+                        "cropped_image": image,
+                        "region": fake_region,
+                    },
+                )
+            return
+
         layout_results, vis_images = layout_detector.process(
             images_for_layout,
             save_visualization=save_visualization,

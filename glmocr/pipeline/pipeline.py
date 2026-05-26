@@ -98,8 +98,13 @@ class Pipeline:
 
             self.preprocess = PreprocessStage(config)
 
+        layout_enabled = config.layout is not None and config.layout.model_dir
+
         if layout_detector is not None:
             self.layout_detector = layout_detector
+        elif not layout_enabled:
+            logger.info("Layout detection disabled (no model_dir configured).")
+            self.layout_detector = None
         else:
             from glmocr.layout import PPDocLayoutDetector
 
@@ -227,7 +232,8 @@ class Pipeline:
         """Start the pipeline (preprocess stage + layout detector + OCR client)."""
         logger.info("Starting Pipeline...")
         self.preprocess.start()
-        self.layout_detector.start()
+        if self.layout_detector is not None:
+            self.layout_detector.start()
         self.ocr_client.start()
         logger.info("Pipeline started!")
 
@@ -235,7 +241,8 @@ class Pipeline:
         """Stop the pipeline."""
         logger.info("Stopping Pipeline...")
         self.ocr_client.stop()
-        self.layout_detector.stop()
+        if self.layout_detector is not None:
+            self.layout_detector.stop()
         self.preprocess.stop()
         logger.info("Pipeline stopped!")
 
