@@ -415,7 +415,8 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                 width_ratio = table_width / image_width
                 height_ratio = table_height / image_height
                 
-                if width_ratio > height_ratio:
+                # Use >= to ensure at least one direction has text regions
+                if width_ratio >= height_ratio:
                     # Table is relatively wide: extend horizontally to full width
                     ext_x1, ext_y1, ext_x2, ext_y2 = 0, y1, image_width, y2
                 else:
