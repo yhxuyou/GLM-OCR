@@ -426,13 +426,19 @@ class PPDocLayoutDetector(BaseLayoutDetector):
             # Determine page orientation
             is_landscape = image_width > image_height
             
-            # Step 3: Sort extended tables (top to bottom or left to right)
+            # Step 3: Add margin to table regions to avoid losing critical information
+            # This ensures table regions have some padding from text regions
+            margin = 10  # pixels
+            margin_x = max(margin, int(image_width * 0.01))  # 1% of width or at least 10px
+            margin_y = max(margin, int(image_height * 0.01))  # 1% of height or at least 10px
+            
+            # Step 4: Sort extended tables (top to bottom or left to right)
             if is_landscape:
                 extended_tables.sort(key=lambda t: t["extended_box"][0])  # sort by x1
             else:
                 extended_tables.sort(key=lambda t: t["extended_box"][1])  # sort by y1
             
-            # Step 4: Split page into table + complementary text regions
+            # Step 5: Split page into table + complementary text regions
             # First add the original (non-extended) table regions
             for table in table_regions:
                 x1, y1, x2, y2 = table["box"]
@@ -461,26 +467,77 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                 valid_index += 1
             
             # Then calculate and add text regions as the complementary space
+            # Add margin to text regions to avoid overlap with table regions
             text_regions = []
             current_pos = 0
             
             if is_landscape:
                 # Landscape: use extended tables to split horizontally
+                # Add margin to text regions to avoid critical information loss
                 for table in extended_tables:
                     ext_x1, ext_y1, ext_x2, ext_y2 = table["extended_box"]
-                    if current_pos < ext_x1:
-                        text_regions.append([current_pos, 0, ext_x1, image_height])
+                    # Add margin to the left edge of text region
+                    text_start = current_pos
+                    text_end = ext_x1
+                    
+                    # Only add text region if there's enough space
+                    if text_end - text_start > margin_x * 2:
+                        # Shrink text region by margin on both sides
+                        text_regions.append([
+                            text_start + margin_x, 
+                            margin_y, 
+                            text_end - margin_x, 
+                            image_height - margin_y
+                        ])
+                    elif text_end > text_start:
+                        # If space is small, add it without margin
+                        text_regions.append([text_start, 0, text_end, image_height])
+                    
                     current_pos = ext_x2
-                if current_pos < image_width:
+                
+                # Add final text region (right side)
+                if image_width - current_pos > margin_x * 2:
+                    text_regions.append([
+                        current_pos + margin_x, 
+                        margin_y, 
+                        image_width - margin_x, 
+                        image_height - margin_y
+                    ])
+                elif image_width > current_pos:
                     text_regions.append([current_pos, 0, image_width, image_height])
             else:
                 # Portrait: use extended tables to split vertically
+                # Add margin to text regions to avoid critical information loss
                 for table in extended_tables:
                     ext_x1, ext_y1, ext_x2, ext_y2 = table["extended_box"]
-                    if current_pos < ext_y1:
-                        text_regions.append([0, current_pos, image_width, ext_y1])
+                    # Add margin to the top edge of text region
+                    text_start = current_pos
+                    text_end = ext_y1
+                    
+                    # Only add text region if there's enough space
+                    if text_end - text_start > margin_y * 2:
+                        # Shrink text region by margin on both sides
+                        text_regions.append([
+                            margin_x, 
+                            text_start + margin_y, 
+                            image_width - margin_x, 
+                            text_end - margin_y
+                        ])
+                    elif text_end > text_start:
+                        # If space is small, add it without margin
+                        text_regions.append([0, text_start, image_width, text_end])
+                    
                     current_pos = ext_y2
-                if current_pos < image_height:
+                
+                # Add final text region (bottom)
+                if image_height - current_pos > margin_y * 2:
+                    text_regions.append([
+                        margin_x, 
+                        current_pos + margin_y, 
+                        image_width - margin_x, 
+                        image_height - margin_y
+                    ])
+                elif image_height > current_pos:
                     text_regions.append([0, current_pos, image_width, image_height])
             
             # Add text regions
