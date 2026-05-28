@@ -398,7 +398,14 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                         "polygon_points": item["polygon_points"],
                     })
             
-            # Step 2: Determine extension direction based on table aspect ratio
+            # Step 2: Expand table regions outward to avoid missing critical information
+            # Allow overlap between table and text regions - it's better to have
+            # overlap than to miss information at boundaries
+            expand_margin = 20  # pixels - expand outward by this amount
+            expand_margin_x = max(expand_margin, int(image_width * 0.02))  # 2% of width or at least 20px
+            expand_margin_y = max(expand_margin, int(image_height * 0.02))  # 2% of height or at least 20px
+            
+            # Step 3: Determine extension direction for each table based on table aspect ratio
             extended_tables = []
             for table in table_regions:
                 x1, y1, x2, y2 = table["box"]
@@ -423,24 +430,21 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                     "polygon_points": table["polygon_points"],
                 })
             
-            # Step 3: Determine page orientation
+            # Step 4: Determine page orientation and extension mode
             is_landscape = image_width > image_height
             
-            # Step 4: Expand table regions outward to avoid missing critical information
-            # Allow overlap between table and text regions - it's better to have
-            # overlap than to miss information at boundaries
-            expand_margin = 20  # pixels - expand outward by this amount
-            expand_margin_x = max(expand_margin, int(image_width * 0.02))  # 2% of width or at least 20px
-            expand_margin_y = max(expand_margin, int(image_height * 0.02))  # 2% of height or at least 20px
+            # Determine dominant extension mode: if most tables are wide, use horizontal split
+            wide_table_count = sum(1 for table in table_regions if (table["box"][2] - table["box"][0]) / image_width > (table["box"][3] - table["box"][1]) / image_height)
+            use_horizontal_split = (wide_table_count >= len(table_regions) / 2) if table_regions else is_landscape
             
-            # Step 5: Sort extended tables (top to bottom or left to right)
-            if is_landscape:
+            # Step 5: Sort extended tables based on extension mode
+            if use_horizontal_split:
                 extended_tables.sort(key=lambda t: t["extended_box"][0])  # sort by x1
             else:
                 extended_tables.sort(key=lambda t: t["extended_box"][1])  # sort by y1
             
             # Step 6: Split page into table + complementary text regions
-            # First add the original (non-extended) table regions with expanded padding
+            # First add the expanded table regions to avoid missing information
             for table in table_regions:
                 x1, y1, x2, y2 = table["box"]
                 
@@ -450,10 +454,10 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                 exp_x2 = min(image_width, x2 + expand_margin_x)
                 exp_y2 = min(image_height, y2 + expand_margin_y)
                 
-                x1_norm = int(float(x1) / image_width * 1000)
-                y1_norm = int(float(y1) / image_height * 1000)
-                x2_norm = int(float(x2) / image_width * 1000)
-                y2_norm = int(float(y2) / image_height * 1000)
+                exp_x1_norm = int(float(exp_x1) / image_width * 1000)
+                exp_y1_norm = int(float(exp_y1) / image_height * 1000)
+                exp_x2_norm = int(float(exp_x2) / image_width * 1000)
+                exp_y2_norm = int(float(exp_y2) / image_height * 1000)
                 
                 poly_array = table["polygon_points"]
                 polygon = [
@@ -468,7 +472,7 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                     "index": valid_index,
                     "label": table["label"],
                     "score": float(table["score"]),
-                    "bbox_2d": [x1_norm, y1_norm, x2_norm, y2_norm],
+                    "bbox_2d": [exp_x1_norm, exp_y1_norm, exp_x2_norm, exp_y2_norm],
                     "polygon": polygon,
                     "task_type": "table",
                 })
@@ -479,8 +483,8 @@ class PPDocLayoutDetector(BaseLayoutDetector):
             text_regions = []
             current_pos = 0
             
-            if is_landscape:
-                # Landscape: use extended tables to split horizontally
+            if use_horizontal_split:
+                # Horizontal split: use extended tables to split horizontally
                 # Text regions fill remaining space, no margin added
                 for table in extended_tables:
                     ext_x1, ext_y1, ext_x2, ext_y2 = table["extended_box"]
@@ -492,7 +496,7 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                 if current_pos < image_width:
                     text_regions.append([current_pos, 0, image_width, image_height])
             else:
-                # Portrait: use extended tables to split vertically
+                # Vertical split: use extended tables to split vertically
                 # Text regions fill remaining space, no margin added
                 for table in extended_tables:
                     ext_x1, ext_y1, ext_x2, ext_y2 = table["extended_box"]
