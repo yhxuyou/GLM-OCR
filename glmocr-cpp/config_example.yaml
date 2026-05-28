@@ -1,0 +1,58 @@
+# GLM-OCR C++ 配置文件示例
+
+pipeline:
+  # OCR API 配置
+  ocr_api:
+    api_host: localhost
+    api_port: 8080
+    # api_url: http://localhost:8080/v1/chat/completions  # 或者直接指定完整 URL
+    api_mode: openai  # 或者 "ollama_generate"
+    model: glm-ocr
+    # api_key: your-api-key-here  # 如果需要
+    verify_ssl: false
+    connect_timeout: 30
+    request_timeout: 120
+    retry_max_attempts: 2
+    connection_pool_size: 128
+
+  # 页面加载器配置
+  page_loader:
+    max_tokens: 8192
+    temperature: 0.0
+    top_p: 0.00001
+    top_k: 1
+    repetition_penalty: 1.1
+    image_format: JPEG
+    min_pixels: 12544  # 112x112
+    max_pixels: 802816  # 14x14x4x1024
+    pdf_dpi: 200
+    # pdf_max_pages: 10  # 限制 PDF 页面数量，可选
+
+  # 结果格式化配置
+  result_formatter:
+    output_format: both  # "json", "markdown", "both"
+    enable_merge_formula_numbers: true
+    enable_merge_text_blocks: true
+    enable_format_bullet_points: true
+
+  # 布局检测配置 (预留)
+  layout:
+    threshold: 0.3
+    batch_size: 8
+    use_polygon: false
+    # model_dir: /path/to/model  # 如果需要本地模型
+
+  # 并行处理配置
+  max_workers: 16
+  page_maxsize: 100
+  region_maxsize: 800
+
+# 服务器配置 (预留)
+server:
+  host: 0.0.0.0
+  port: 5002
+  debug: false
+
+# 日志配置
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
