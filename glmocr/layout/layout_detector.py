@@ -375,6 +375,9 @@ class PPDocLayoutDetector(BaseLayoutDetector):
             image_width, image_height = pil_images[img_idx].size
             results = []
             valid_index = 0
+            
+            # Step 1: Collect and process table regions
+            table_regions = []
             for item in paddle_results:
                 label = item["label"]
                 score = item["score"]
@@ -386,14 +389,52 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                         break
                 if task_type is None or task_type == "abandon":
                     continue
-                x1, y1, x2, y2 = box
+                
+                if task_type == "table":
+                    table_regions.append({
+                        "box": box,
+                        "label": label,
+                        "score": score,
+                        "polygon_points": item["polygon_points"],
+                    })
+            
+            # Step 2: Determine page orientation and extend tables
+            is_landscape = image_width > image_height
+            extended_tables = []
+            for table in table_regions:
+                x1, y1, x2, y2 = table["box"]
+                
+                if is_landscape:
+                    # Landscape: extend to full width
+                    ext_x1, ext_y1, ext_x2, ext_y2 = 0, y1, image_width, y2
+                else:
+                    # Portrait: extend to full height
+                    ext_x1, ext_y1, ext_x2, ext_y2 = x1, 0, x2, image_height
+                
+                extended_tables.append({
+                    "original_box": table["box"],
+                    "extended_box": [ext_x1, ext_y1, ext_x2, ext_y2],
+                    "label": table["label"],
+                    "score": table["score"],
+                    "polygon_points": table["polygon_points"],
+                })
+            
+            # Step 3: Sort extended tables (top to bottom or left to right)
+            if is_landscape:
+                extended_tables.sort(key=lambda t: t["extended_box"][0])  # sort by x1
+            else:
+                extended_tables.sort(key=lambda t: t["extended_box"][1])  # sort by y1
+            
+            # Step 4: Split page into table + complementary text regions
+            # First add the original (non-extended) table regions
+            for table in table_regions:
+                x1, y1, x2, y2 = table["box"]
                 x1_norm = int(float(x1) / image_width * 1000)
                 y1_norm = int(float(y1) / image_height * 1000)
                 x2_norm = int(float(x2) / image_width * 1000)
                 y2_norm = int(float(y2) / image_height * 1000)
-
-                # Convert polygon_points to normalized list format
-                poly_array = item["polygon_points"]
+                
+                poly_array = table["polygon_points"]
                 polygon = [
                     [
                         int(float(point[0]) / image_width * 1000),
@@ -401,18 +442,65 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                     ]
                     for point in poly_array
                 ]
-
-                results.append(
-                    {
-                        "index": valid_index,
-                        "label": label,
-                        "score": float(score),
-                        "bbox_2d": [x1_norm, y1_norm, x2_norm, y2_norm],
-                        "polygon": polygon,
-                        "task_type": task_type,
-                    }
-                )
+                
+                results.append({
+                    "index": valid_index,
+                    "label": table["label"],
+                    "score": float(table["score"]),
+                    "bbox_2d": [x1_norm, y1_norm, x2_norm, y2_norm],
+                    "polygon": polygon,
+                    "task_type": "table",
+                })
                 valid_index += 1
+            
+            # Then calculate and add text regions as the complementary space
+            text_regions = []
+            current_pos = 0
+            
+            if is_landscape:
+                # Landscape: use extended tables to split horizontally
+                for table in extended_tables:
+                    ext_x1, ext_y1, ext_x2, ext_y2 = table["extended_box"]
+                    if current_pos < ext_x1:
+                        text_regions.append([current_pos, 0, ext_x1, image_height])
+                    current_pos = ext_x2
+                if current_pos < image_width:
+                    text_regions.append([current_pos, 0, image_width, image_height])
+            else:
+                # Portrait: use extended tables to split vertically
+                for table in extended_tables:
+                    ext_x1, ext_y1, ext_x2, ext_y2 = table["extended_box"]
+                    if current_pos < ext_y1:
+                        text_regions.append([0, current_pos, image_width, ext_y1])
+                    current_pos = ext_y2
+                if current_pos < image_height:
+                    text_regions.append([0, current_pos, image_width, image_height])
+            
+            # Add text regions
+            for text_box in text_regions:
+                x1, y1, x2, y2 = text_box
+                x1_norm = int(float(x1) / image_width * 1000)
+                y1_norm = int(float(y1) / image_height * 1000)
+                x2_norm = int(float(x2) / image_width * 1000)
+                y2_norm = int(float(y2) / image_height * 1000)
+                
+                polygon = [
+                    [x1_norm, y1_norm],
+                    [x2_norm, y1_norm],
+                    [x2_norm, y2_norm],
+                    [x1_norm, y2_norm],
+                ]
+                
+                results.append({
+                    "index": valid_index,
+                    "label": "text",
+                    "score": 1.0,
+                    "bbox_2d": [x1_norm, y1_norm, x2_norm, y2_norm],
+                    "polygon": polygon,
+                    "task_type": "text",
+                })
+                valid_index += 1
+            
             all_results.append(results)
 
         return all_results, vis_images
