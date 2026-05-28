@@ -398,17 +398,21 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                         "polygon_points": item["polygon_points"],
                     })
             
-            # Step 2: Determine page orientation and extend tables
-            is_landscape = image_width > image_height
+            # Step 2: Determine extension direction based on table aspect ratio
             extended_tables = []
             for table in table_regions:
                 x1, y1, x2, y2 = table["box"]
+                table_width = x2 - x1
+                table_height = y2 - y1
                 
-                if is_landscape:
-                    # Landscape: extend to full width
+                width_ratio = table_width / image_width
+                height_ratio = table_height / image_height
+                
+                if width_ratio > height_ratio:
+                    # Table is relatively wide: extend horizontally to full width
                     ext_x1, ext_y1, ext_x2, ext_y2 = 0, y1, image_width, y2
                 else:
-                    # Portrait: extend to full height
+                    # Table is relatively tall: extend vertically to full height
                     ext_x1, ext_y1, ext_x2, ext_y2 = x1, 0, x2, image_height
                 
                 extended_tables.append({
@@ -418,6 +422,9 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                     "score": table["score"],
                     "polygon_points": table["polygon_points"],
                 })
+            
+            # Determine page orientation
+            is_landscape = image_width > image_height
             
             # Step 3: Sort extended tables (top to bottom or left to right)
             if is_landscape:
