@@ -229,6 +229,7 @@ class LayoutConfig(_BaseConfig):
     label_task_mapping: Optional[Dict[str, Any]] = None
     use_polygon: bool = False
     id2label: Optional[Dict[Union[int, str], str]] = None
+    table_boundary_margin: float = 0.01
 
     @field_validator("device")
     @classmethod

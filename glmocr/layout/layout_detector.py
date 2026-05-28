@@ -51,6 +51,7 @@ class PPDocLayoutDetector(BaseLayoutDetector):
 
         self.label_task_mapping = config.label_task_mapping
         self.id2label = getattr(config, "id2label", None)
+        self.table_boundary_margin = getattr(config, "table_boundary_margin", 0.01)
 
         self._model = None
         self._image_processor = None
@@ -400,6 +401,8 @@ class PPDocLayoutDetector(BaseLayoutDetector):
             
             # Step 2: Determine extension direction based on table aspect ratio
             extended_tables = []
+            horizontal_extend_count = 0
+            vertical_extend_count = 0
             for table in table_regions:
                 x1, y1, x2, y2 = table["box"]
                 table_width = x2 - x1
@@ -409,11 +412,11 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                 height_ratio = table_height / image_height
                 
                 if width_ratio > height_ratio:
-                    # Table is relatively wide: extend horizontally to full width
                     ext_x1, ext_y1, ext_x2, ext_y2 = 0, y1, image_width, y2
+                    horizontal_extend_count += 1
                 else:
-                    # Table is relatively tall: extend vertically to full height
                     ext_x1, ext_y1, ext_x2, ext_y2 = x1, 0, x2, image_height
+                    vertical_extend_count += 1
                 
                 extended_tables.append({
                     "original_box": table["box"],
@@ -423,31 +426,98 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                     "polygon_points": table["polygon_points"],
                 })
             
-            # Determine page orientation
-            is_landscape = image_width > image_height
+            # Determine splitting direction based on majority extension direction
+            # horizontal extend -> tables span full width -> text above/below -> split by y
+            # vertical extend -> tables span full height -> text left/right -> split by x
+            split_by_y = horizontal_extend_count >= vertical_extend_count
             
-            # Step 3: Sort extended tables (top to bottom or left to right)
-            if is_landscape:
-                extended_tables.sort(key=lambda t: t["extended_box"][0])  # sort by x1
+            # Calculate boundary margin in pixels
+            margin = int(self.table_boundary_margin * min(image_width, image_height))
+            
+            # Step 3: Sort extended tables
+            if split_by_y:
+                extended_tables.sort(key=lambda t: t["extended_box"][1])
             else:
-                extended_tables.sort(key=lambda t: t["extended_box"][1])  # sort by y1
+                extended_tables.sort(key=lambda t: t["extended_box"][0])
             
-            # Step 4: Split page into table + complementary text regions
-            # First add the original (non-extended) table regions
-            for table in table_regions:
-                x1, y1, x2, y2 = table["box"]
+            # Step 4: Expand extended table boxes by margin (padded)
+            for table in extended_tables:
+                ext_x1, ext_y1, ext_x2, ext_y2 = table["extended_box"]
+                table["padded_box"] = [
+                    max(0, ext_x1 - margin),
+                    max(0, ext_y1 - margin),
+                    min(image_width, ext_x2 + margin),
+                    min(image_height, ext_y2 + margin),
+                ]
+            
+            # Step 5: Split page into table + complementary text regions
+            # Use original (non-padded) extended boxes for gap calculation
+            text_regions = []
+            current_pos = 0
+            
+            if split_by_y:
+                for table in extended_tables:
+                    _, ext_y1, _, ext_y2 = table["extended_box"]
+                    if current_pos < ext_y1:
+                        text_regions.append({
+                            "box": [0, current_pos, image_width, ext_y1],
+                            "padded_box": [
+                                0,
+                                max(0, current_pos - margin),
+                                image_width,
+                                min(image_height, ext_y1 + margin),
+                            ],
+                        })
+                    current_pos = ext_y2
+                if current_pos < image_height:
+                    text_regions.append({
+                        "box": [0, current_pos, image_width, image_height],
+                        "padded_box": [
+                            0,
+                            max(0, current_pos - margin),
+                            image_width,
+                            image_height,
+                        ],
+                    })
+            else:
+                for table in extended_tables:
+                    ext_x1, _, ext_x2, _ = table["extended_box"]
+                    if current_pos < ext_x1:
+                        text_regions.append({
+                            "box": [current_pos, 0, ext_x1, image_height],
+                            "padded_box": [
+                                max(0, current_pos - margin),
+                                0,
+                                min(image_width, ext_x1 + margin),
+                                image_height,
+                            ],
+                        })
+                    current_pos = ext_x2
+                if current_pos < image_width:
+                    text_regions.append({
+                        "box": [current_pos, 0, image_width, image_height],
+                        "padded_box": [
+                            max(0, current_pos - margin),
+                            0,
+                            image_width,
+                            image_height,
+                        ],
+                    })
+            
+            # Step 6: Output results using padded boxes (allow overlap)
+            # Add table regions (using padded extended boxes)
+            for table in extended_tables:
+                x1, y1, x2, y2 = table["padded_box"]
                 x1_norm = int(float(x1) / image_width * 1000)
                 y1_norm = int(float(y1) / image_height * 1000)
                 x2_norm = int(float(x2) / image_width * 1000)
                 y2_norm = int(float(y2) / image_height * 1000)
                 
-                poly_array = table["polygon_points"]
                 polygon = [
-                    [
-                        int(float(point[0]) / image_width * 1000),
-                        int(float(point[1]) / image_height * 1000),
-                    ]
-                    for point in poly_array
+                    [x1_norm, y1_norm],
+                    [x2_norm, y1_norm],
+                    [x2_norm, y2_norm],
+                    [x1_norm, y2_norm],
                 ]
                 
                 results.append({
@@ -460,32 +530,9 @@ class PPDocLayoutDetector(BaseLayoutDetector):
                 })
                 valid_index += 1
             
-            # Then calculate and add text regions as the complementary space
-            text_regions = []
-            current_pos = 0
-            
-            if is_landscape:
-                # Landscape: use extended tables to split horizontally
-                for table in extended_tables:
-                    ext_x1, ext_y1, ext_x2, ext_y2 = table["extended_box"]
-                    if current_pos < ext_x1:
-                        text_regions.append([current_pos, 0, ext_x1, image_height])
-                    current_pos = ext_x2
-                if current_pos < image_width:
-                    text_regions.append([current_pos, 0, image_width, image_height])
-            else:
-                # Portrait: use extended tables to split vertically
-                for table in extended_tables:
-                    ext_x1, ext_y1, ext_x2, ext_y2 = table["extended_box"]
-                    if current_pos < ext_y1:
-                        text_regions.append([0, current_pos, image_width, ext_y1])
-                    current_pos = ext_y2
-                if current_pos < image_height:
-                    text_regions.append([0, current_pos, image_width, image_height])
-            
-            # Add text regions
-            for text_box in text_regions:
-                x1, y1, x2, y2 = text_box
+            # Add text regions (using padded boxes)
+            for text_region in text_regions:
+                x1, y1, x2, y2 = text_region["padded_box"]
                 x1_norm = int(float(x1) / image_width * 1000)
                 y1_norm = int(float(y1) / image_height * 1000)
                 x2_norm = int(float(x2) / image_width * 1000)
