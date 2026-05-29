@@ -45,6 +45,16 @@ struct PageLoaderConfig {
     int pdf_dpi = 200;
     std::optional<int> pdf_max_pages;
     bool pdf_verbose = false;
+
+    PageLoaderConfig() {
+        task_prompt_mapping["text"] = "Text Recognition:";
+        task_prompt_mapping["table"] = "Table Recognition:";
+        task_prompt_mapping["formula"] = "Formula Recognition:";
+        task_prompt_mapping["image"] = "Image Description:";
+        task_prompt_mapping["chart"] = "Chart Recognition:";
+        task_prompt_mapping["display_formula"] = "Formula Recognition:";
+        task_prompt_mapping["inline_formula"] = "Formula Recognition:";
+    }
 };
 
 struct ResultFormatterConfig {
