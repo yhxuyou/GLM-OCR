@@ -12,48 +12,67 @@ option(USE_CUDA "Enable CUDA execution provider for ONNX Runtime" OFF)
 find_package(Threads REQUIRED)
 find_package(CURL REQUIRED)
 
-# ONNX Runtime
+set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+
+# --- ONNX Runtime ---
 if(NOT DEFINED ONNXRUNTIME_ROOT)
     if(USE_CUDA)
-        set(ONNXRUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime-gpu")
+        set(ONNXRUNTIME_ROOT "${THIRD_PARTY_DIR}/onnxruntime-gpu")
     else()
-        set(ONNXRUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime")
+        set(ONNXRUNTIME_ROOT "${THIRD_PARTY_DIR}/onnxruntime")
     endif()
 endif()
 
 if(NOT EXISTS "${ONNXRUNTIME_ROOT}/include/onnxruntime_cxx_api.h")
-    message(STATUS "ONNX Runtime not found at ${ONNXRUNTIME_ROOT}")
-    message(STATUS "Please download ONNX Runtime and extract to ${ONNXRUNTIME_ROOT}")
-    message(STATUS "  CPU: https://github.com/microsoft/onnxruntime/releases")
-    message(STATUS "  GPU: https://github.com/microsoft/onnxruntime/releases (note: download GPU version)")
-    message(FATAL_ERROR "ONNX Runtime is required")
+    message(FATAL_ERROR
+        "ONNX Runtime not found at ${ONNXRUNTIME_ROOT}\n"
+        "Please run prepare_deps.sh on an internet-connected machine first,\n"
+        "or manually download ONNX Runtime to ${ONNXRUNTIME_ROOT}"
+    )
 endif()
 
-include(FetchContent)
+# --- nlohmann/json (header-only) ---
+set(NLOHMANN_JSON_DIR "${THIRD_PARTY_DIR}/nlohmann_json")
+if(NOT EXISTS "${NLOHMANN_JSON_DIR}/single_include/nlohmann/json.hpp")
+    message(FATAL_ERROR
+        "nlohmann/json not found at ${NLOHMANN_JSON_DIR}\n"
+        "Please run prepare_deps.sh on an internet-connected machine first."
+    )
+endif()
+add_library(nlohmann_json INTERFACE)
+target_include_directories(nlohmann_json INTERFACE "${NLOHMANN_JSON_DIR}/single_include")
+add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
 
-FetchContent_Declare(
-    nlohmann_json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.2
-)
-FetchContent_MakeAvailable(nlohmann_json)
+# --- stb (header-only) ---
+set(STB_DIR "${THIRD_PARTY_DIR}/stb")
+if(NOT EXISTS "${STB_DIR}/stb_image.h")
+    message(FATAL_ERROR
+        "stb not found at ${STB_DIR}\n"
+        "Please run prepare_deps.sh on an internet-connected machine first."
+    )
+endif()
 
-FetchContent_Declare(
-    stb
-    GIT_REPOSITORY https://github.com/nothings/stb.git
-    GIT_TAG master
-    CONFIGURE_COMMAND ""
-    BUILD_COMMAND ""
-)
-FetchContent_MakeAvailable(stb)
+# --- yaml-cpp (compiled) ---
+set(YAML_CPP_DIR "${THIRD_PARTY_DIR}/yaml-cpp")
+if(NOT EXISTS "${YAML_CPP_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "yaml-cpp not found at ${YAML_CPP_DIR}\n"
+        "Please run prepare_deps.sh on an internet-connected machine first."
+    )
+endif()
+set(YAML_CPP_BUILD_TESTS OFF CACHE BOOL "Disable yaml-cpp tests" FORCE)
+add_subdirectory("${YAML_CPP_DIR}" yaml-cpp)
 
-FetchContent_Declare(
-    yaml_cpp
-    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-    GIT_TAG yaml-cpp-0.7.0
-)
-FetchContent_MakeAvailable(yaml_cpp)
+# --- cpp-httplib (header-only) ---
+set(HTTPLIB_FILE "${THIRD_PARTY_DIR}/httplib.h")
+if(NOT EXISTS "${HTTPLIB_FILE}")
+    message(FATAL_ERROR
+        "cpp-httplib not found at ${HTTPLIB_FILE}\n"
+        "Please run prepare_deps.sh on an internet-connected machine first."
+    )
+endif()
 
+# --- Main library ---
 add_library(glmocr STATIC
     src/config.cpp
     src/page_loader.cpp
@@ -72,9 +91,9 @@ add_library(glmocr STATIC
 
 target_include_directories(glmocr PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${stb_SOURCE_DIR}
+    ${STB_DIR}
     ${ONNXRUNTIME_ROOT}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+    ${THIRD_PARTY_DIR}
 )
 
 target_link_libraries(glmocr PUBLIC
@@ -98,7 +117,7 @@ target_link_directories(glmocr PUBLIC "${ONNXRUNTIME_ROOT}/lib")
 if(BUILD_EXAMPLES)
     add_executable(glmocr_cli examples/cli.cpp)
     target_link_libraries(glmocr_cli PRIVATE glmocr)
-    
+
     add_executable(simple_example examples/simple.cpp)
     target_link_libraries(simple_example PRIVATE glmocr)
 
