@@ -104,6 +104,9 @@ if(BUILD_EXAMPLES)
 
     add_executable(glmocr_server examples/server_main.cpp)
     target_link_libraries(glmocr_server PRIVATE glmocr)
+
+    add_executable(test_visualize examples/test_visualize.cpp)
+    target_link_libraries(test_visualize PRIVATE glmocr)
 endif()
 
 if(BUILD_TESTS)
