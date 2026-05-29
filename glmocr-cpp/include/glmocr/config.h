@@ -88,6 +88,8 @@ struct LayoutConfig {
     std::optional<std::map<std::string, std::vector<std::string>>> label_task_mapping;
     bool use_polygon = false;
     std::optional<std::map<std::string, std::string>> id2label;
+    bool filter_nested = true;
+    float min_overlap_ratio = 0.8f;
 };
 
 // Pipeline configuration

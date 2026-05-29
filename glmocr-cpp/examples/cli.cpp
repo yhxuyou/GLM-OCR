@@ -18,12 +18,14 @@ void print_usage(const char* prog_name) {
     std::cout << "  --url URL               Full OCR API URL (overrides host/port)\n";
     std::cout << "  --model NAME            Model name (default: glm-ocr)\n";
     std::cout << "  --api-key KEY           API key (if required)\n";
+    std::cout << "  --layout-model PATH     Path to PP-DocLayoutV3 ONNX model\n";
+    std::cout << "  --layout-threshold F    Layout detection threshold (default: 0.3)\n";
     std::cout << "  --json                  Only output JSON\n";
     std::cout << "  --markdown              Only output Markdown\n";
     std::cout << "\nExamples:\n";
     std::cout << "  " << prog_name << " document.png\n";
+    std::cout << "  " << prog_name << " --layout-model PP-DocLayoutV3.onnx document.pdf\n";
     std::cout << "  " << prog_name << " --host localhost --port 8080 document.pdf\n";
-    std::cout << "  " << prog_name << " --output ./results *.png\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -39,7 +41,6 @@ int main(int argc, char* argv[]) {
     
     glmocr::GlmOcrConfig config;
     
-    // Parse arguments
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         
@@ -47,41 +48,29 @@ int main(int argc, char* argv[]) {
             print_usage(argv[0]);
             return 0;
         } else if (arg == "-o" || arg == "--output") {
-            if (++i >= argc) {
-                std::cerr << "Error: --output requires an argument\n";
-                return 1;
-            }
+            if (++i >= argc) { std::cerr << "Error: --output requires an argument\n"; return 1; }
             output_dir = argv[i];
         } else if (arg == "--host") {
-            if (++i >= argc) {
-                std::cerr << "Error: --host requires an argument\n";
-                return 1;
-            }
+            if (++i >= argc) { std::cerr << "Error: --host requires an argument\n"; return 1; }
             config.pipeline.ocr_api.api_host = argv[i];
         } else if (arg == "--port") {
-            if (++i >= argc) {
-                std::cerr << "Error: --port requires an argument\n";
-                return 1;
-            }
+            if (++i >= argc) { std::cerr << "Error: --port requires an argument\n"; return 1; }
             config.pipeline.ocr_api.api_port = std::stoi(argv[i]);
         } else if (arg == "--url") {
-            if (++i >= argc) {
-                std::cerr << "Error: --url requires an argument\n";
-                return 1;
-            }
+            if (++i >= argc) { std::cerr << "Error: --url requires an argument\n"; return 1; }
             config.pipeline.ocr_api.api_url = argv[i];
         } else if (arg == "--model") {
-            if (++i >= argc) {
-                std::cerr << "Error: --model requires an argument\n";
-                return 1;
-            }
+            if (++i >= argc) { std::cerr << "Error: --model requires an argument\n"; return 1; }
             config.pipeline.ocr_api.model = argv[i];
         } else if (arg == "--api-key") {
-            if (++i >= argc) {
-                std::cerr << "Error: --api-key requires an argument\n";
-                return 1;
-            }
+            if (++i >= argc) { std::cerr << "Error: --api-key requires an argument\n"; return 1; }
             config.pipeline.ocr_api.api_key = argv[i];
+        } else if (arg == "--layout-model") {
+            if (++i >= argc) { std::cerr << "Error: --layout-model requires an argument\n"; return 1; }
+            config.pipeline.layout.model_dir = argv[i];
+        } else if (arg == "--layout-threshold") {
+            if (++i >= argc) { std::cerr << "Error: --layout-threshold requires an argument\n"; return 1; }
+            config.pipeline.layout.threshold = std::stof(argv[i]);
         } else if (arg == "--json") {
             json_only = true;
         } else if (arg == "--markdown") {
@@ -101,7 +90,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    // Create output directory if it doesn't exist
     if (!fs::exists(output_dir)) {
         fs::create_directories(output_dir);
     }
@@ -121,11 +109,9 @@ int main(int argc, char* argv[]) {
             
             auto result = ocr.parse(file_path);
             
-            // Get base filename
             fs::path p(file_path);
             std::string base_name = p.stem().string();
             
-            // Save outputs
             if (!markdown_only) {
                 std::string json_path = (fs::path(output_dir) / (base_name + ".json")).string();
                 std::ofstream json_out(json_path);
