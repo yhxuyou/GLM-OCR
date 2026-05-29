@@ -5,6 +5,7 @@
 #include <chrono>
 #include <random>
 #include <algorithm>
+#include <atomic>
 
 namespace glmocr {
 

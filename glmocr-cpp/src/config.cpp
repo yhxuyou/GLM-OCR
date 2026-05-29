@@ -7,9 +7,6 @@ namespace glmocr {
 
 using json = nlohmann::json;
 
-// Helper functions to convert between config structs and JSON
-namespace {
-
 void to_json(json& j, const OCRApiConfig& c) {
     j = json{
         {"api_host", c.api_host},
@@ -122,7 +119,9 @@ void to_json(json& j, const LayoutConfig& c) {
         {"cuda_visible_devices", c.cuda_visible_devices},
         {"layout_nms", c.layout_nms},
         {"layout_merge_bboxes_mode", c.layout_merge_bboxes_mode},
-        {"use_polygon", c.use_polygon}
+        {"use_polygon", c.use_polygon},
+        {"filter_nested", c.filter_nested},
+        {"min_overlap_ratio", c.min_overlap_ratio}
     };
     if (c.model_dir) j["model_dir"] = *c.model_dir;
     if (c.threshold_by_class) j["threshold_by_class"] = *c.threshold_by_class;
@@ -148,6 +147,8 @@ void from_json(const json& j, LayoutConfig& c) {
     if (j.contains("label_task_mapping")) c.label_task_mapping = j.at("label_task_mapping").get<std::map<std::string, std::vector<std::string>>>();
     if (j.contains("use_polygon")) j.at("use_polygon").get_to(c.use_polygon);
     if (j.contains("id2label")) c.id2label = j.at("id2label").get<std::map<std::string, std::string>>();
+    if (j.contains("filter_nested")) j.at("filter_nested").get_to(c.filter_nested);
+    if (j.contains("min_overlap_ratio")) j.at("min_overlap_ratio").get_to(c.min_overlap_ratio);
 }
 
 void to_json(json& j, const PipelineConfig& c) {
@@ -172,8 +173,6 @@ void from_json(const json& j, PipelineConfig& c) {
     if (j.contains("region_maxsize")) j.at("region_maxsize").get_to(c.region_maxsize);
 }
 
-} // anonymous namespace
-
 GlmOcrConfig GlmOcrConfig::from_json(const std::string& json_str) {
     GlmOcrConfig config;
     json j = json::parse(json_str);
@@ -189,7 +188,7 @@ GlmOcrConfig GlmOcrConfig::from_json(const std::string& json_str) {
 GlmOcrConfig GlmOcrConfig::from_file(const std::string& filepath) {
     std::ifstream file(filepath);
     if (!file.is_open()) {
-        return GlmOcrConfig(); // Return default config if file not found
+        return GlmOcrConfig();
     }
     std::stringstream buffer;
     buffer << file.rdbuf();

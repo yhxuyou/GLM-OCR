@@ -58,7 +58,7 @@ struct PageResult {
 struct PipelineResult {
     std::vector<PageResult> pages;
     std::string json_result;
-    std::string markdown_result;
+    std::string markdown_output;
     std::map<std::string, std::shared_ptr<void>> image_files; // filename -> image data
     std::map<int, std::shared_ptr<void>> layout_vis_images; // page idx -> vis image
 };
