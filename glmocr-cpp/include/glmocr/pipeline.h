@@ -3,17 +3,15 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <thread>
-#include <mutex>
-#include <queue>
-#include <condition_variable>
-#include <atomic>
 #include "glmocr/common.h"
 #include "glmocr/config.h"
 #include "glmocr/page_loader.h"
 #include "glmocr/ocr_client.h"
 #include "glmocr/result_formatter.h"
 #include "glmocr/layout_detector.h"
+#include "glmocr/doc_detector.h"
+#include "glmocr/orientation_detector.h"
+#include "glmocr/undistorter.h"
 
 namespace glmocr {
 
@@ -36,10 +34,14 @@ private:
     std::unique_ptr<OCRClient> ocr_client_;
     std::unique_ptr<ResultFormatter> formatter_;
     std::unique_ptr<LayoutDetector> layout_detector_;
+    std::unique_ptr<DocDetector> doc_detector_;
+    std::unique_ptr<OrientationDetector> orientation_detector_;
+    std::unique_ptr<UnDistorter> undistorter_;
     bool started_ = false;
 
     std::string process_page_ocr_only(const Image& image);
     Image crop_region(const Image& image, const BBox& bbox);
+    Image preprocess_image(const Image& image);
 };
 
 class GlmOcr {

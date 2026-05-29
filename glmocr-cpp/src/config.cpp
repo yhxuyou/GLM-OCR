@@ -151,12 +151,72 @@ void from_json(const json& j, LayoutConfig& c) {
     if (j.contains("min_overlap_ratio")) j.at("min_overlap_ratio").get_to(c.min_overlap_ratio);
 }
 
+void to_json(json& j, const DocDetectorConfig& c) {
+    j = json{{"input_size", c.input_size}, {"conf_threshold", c.conf_threshold},
+             {"iou_threshold", c.iou_threshold}, {"max_det", c.max_det}, {"workers", c.workers}};
+    if (c.model_path) j["model_path"] = *c.model_path;
+}
+
+void from_json(const json& j, DocDetectorConfig& c) {
+    if (j.contains("model_path")) c.model_path = j.at("model_path").get<std::string>();
+    if (j.contains("input_size")) j.at("input_size").get_to(c.input_size);
+    if (j.contains("conf_threshold")) j.at("conf_threshold").get_to(c.conf_threshold);
+    if (j.contains("iou_threshold")) j.at("iou_threshold").get_to(c.iou_threshold);
+    if (j.contains("max_det")) j.at("max_det").get_to(c.max_det);
+    if (j.contains("workers")) j.at("workers").get_to(c.workers);
+}
+
+void to_json(json& j, const OrientationConfig& c) {
+    j = json{{"resize_short", c.resize_short}, {"crop_size", c.crop_size},
+             {"batch_size", c.batch_size}, {"workers", c.workers}};
+    if (c.model_path) j["model_path"] = *c.model_path;
+}
+
+void from_json(const json& j, OrientationConfig& c) {
+    if (j.contains("model_path")) c.model_path = j.at("model_path").get<std::string>();
+    if (j.contains("resize_short")) j.at("resize_short").get_to(c.resize_short);
+    if (j.contains("crop_size")) j.at("crop_size").get_to(c.crop_size);
+    if (j.contains("batch_size")) j.at("batch_size").get_to(c.batch_size);
+    if (j.contains("workers")) j.at("workers").get_to(c.workers);
+}
+
+void to_json(json& j, const UnDistortConfig& c) {
+    j = json{{"img_width", c.img_width}, {"img_height", c.img_height},
+             {"grid_w", c.grid_w}, {"grid_h", c.grid_h}, {"workers", c.workers}};
+    if (c.model_path) j["model_path"] = *c.model_path;
+}
+
+void from_json(const json& j, UnDistortConfig& c) {
+    if (j.contains("model_path")) c.model_path = j.at("model_path").get<std::string>();
+    if (j.contains("img_width")) j.at("img_width").get_to(c.img_width);
+    if (j.contains("img_height")) j.at("img_height").get_to(c.img_height);
+    if (j.contains("grid_w")) j.at("grid_w").get_to(c.grid_w);
+    if (j.contains("grid_h")) j.at("grid_h").get_to(c.grid_h);
+    if (j.contains("workers")) j.at("workers").get_to(c.workers);
+}
+
+void to_json(json& j, const PreprocessConfig& c) {
+    j = json{{"doc_detector", c.doc_detector}, {"orientation", c.orientation},
+             {"undistort", c.undistort}, {"enable_doc_detect", c.enable_doc_detect},
+             {"enable_orientation", c.enable_orientation}, {"enable_undistort", c.enable_undistort}};
+}
+
+void from_json(const json& j, PreprocessConfig& c) {
+    if (j.contains("doc_detector")) j.at("doc_detector").get_to(c.doc_detector);
+    if (j.contains("orientation")) j.at("orientation").get_to(c.orientation);
+    if (j.contains("undistort")) j.at("undistort").get_to(c.undistort);
+    if (j.contains("enable_doc_detect")) j.at("enable_doc_detect").get_to(c.enable_doc_detect);
+    if (j.contains("enable_orientation")) j.at("enable_orientation").get_to(c.enable_orientation);
+    if (j.contains("enable_undistort")) j.at("enable_undistort").get_to(c.enable_undistort);
+}
+
 void to_json(json& j, const PipelineConfig& c) {
     j = json{
         {"page_loader", c.page_loader},
         {"ocr_api", c.ocr_api},
         {"result_formatter", c.result_formatter},
         {"layout", c.layout},
+        {"preprocess", c.preprocess},
         {"max_workers", c.max_workers},
         {"page_maxsize", c.page_maxsize},
         {"region_maxsize", c.region_maxsize}
@@ -168,6 +228,7 @@ void from_json(const json& j, PipelineConfig& c) {
     if (j.contains("ocr_api")) j.at("ocr_api").get_to(c.ocr_api);
     if (j.contains("result_formatter")) j.at("result_formatter").get_to(c.result_formatter);
     if (j.contains("layout")) j.at("layout").get_to(c.layout);
+    if (j.contains("preprocess")) j.at("preprocess").get_to(c.preprocess);
     if (j.contains("max_workers")) j.at("max_workers").get_to(c.max_workers);
     if (j.contains("page_maxsize")) j.at("page_maxsize").get_to(c.page_maxsize);
     if (j.contains("region_maxsize")) j.at("region_maxsize").get_to(c.region_maxsize);

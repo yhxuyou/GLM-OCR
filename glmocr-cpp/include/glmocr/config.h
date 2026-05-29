@@ -8,7 +8,6 @@
 
 namespace glmocr {
 
-// OCR API configuration
 struct OCRApiConfig {
     std::string api_host = "localhost";
     int api_port = 8080;
@@ -26,11 +25,10 @@ struct OCRApiConfig {
     float retry_jitter_ratio = 0.2f;
     std::vector<int> retry_status_codes = {429, 500, 502, 503, 504};
     int connection_pool_size = 128;
-    std::string api_mode = "openai"; // "openai" or "ollama_generate"
+    std::string api_mode = "openai";
     std::optional<std::string> model;
 };
 
-// Page loader configuration
 struct PageLoaderConfig {
     int max_tokens = 8192;
     float temperature = 0.0f;
@@ -49,18 +47,16 @@ struct PageLoaderConfig {
     bool pdf_verbose = false;
 };
 
-// Result formatter configuration
 struct ResultFormatterConfig {
     bool filter_nested = true;
     float min_overlap_ratio = 0.8f;
-    std::string output_format = "both"; // "json", "markdown", "both"
+    std::string output_format = "both";
     bool enable_merge_formula_numbers = true;
     bool enable_merge_text_blocks = true;
     bool enable_format_bullet_points = true;
     std::map<std::string, std::vector<std::string>> label_visualization_mapping;
-    
+
     ResultFormatterConfig() {
-        // Default label mappings
         label_visualization_mapping["image"] = {"chart", "image"};
         label_visualization_mapping["table"] = {"table"};
         label_visualization_mapping["formula"] = {"display_formula", "inline_formula"};
@@ -72,7 +68,6 @@ struct ResultFormatterConfig {
     }
 };
 
-// Layout detector configuration (placeholder for future implementation)
 struct LayoutConfig {
     std::optional<std::string> model_dir;
     float threshold = 0.3f;
@@ -92,39 +87,66 @@ struct LayoutConfig {
     float min_overlap_ratio = 0.8f;
 };
 
-// Pipeline configuration
+struct DocDetectorConfig {
+    std::optional<std::string> model_path;
+    int input_size = 640;
+    float conf_threshold = 0.25f;
+    float iou_threshold = 0.45f;
+    int max_det = 300;
+    int workers = 4;
+};
+
+struct OrientationConfig {
+    std::optional<std::string> model_path;
+    int resize_short = 256;
+    int crop_size = 224;
+    int batch_size = 3;
+    int workers = 4;
+};
+
+struct UnDistortConfig {
+    std::optional<std::string> model_path;
+    int img_width = 488;
+    int img_height = 712;
+    int grid_w = 45;
+    int grid_h = 31;
+    int workers = 4;
+};
+
+struct PreprocessConfig {
+    DocDetectorConfig doc_detector;
+    OrientationConfig orientation;
+    UnDistortConfig undistort;
+    bool enable_doc_detect = false;
+    bool enable_orientation = false;
+    bool enable_undistort = false;
+};
+
 struct PipelineConfig {
     PageLoaderConfig page_loader;
     OCRApiConfig ocr_api;
     ResultFormatterConfig result_formatter;
     LayoutConfig layout;
+    PreprocessConfig preprocess;
     int max_workers = 16;
     int page_maxsize = 100;
     int region_maxsize = 800;
 };
 
-// Main configuration
 struct GlmOcrConfig {
     PipelineConfig pipeline;
-    
-    // Server settings (optional)
+
     std::string server_host = "0.0.0.0";
     int server_port = 5002;
     bool server_debug = false;
-    
-    // Logging
+
     std::string log_level = "INFO";
     std::optional<std::string> log_format;
-    
+
     GlmOcrConfig() = default;
-    
-    // Load from JSON string
+
     static GlmOcrConfig from_json(const std::string& json_str);
-    
-    // Load from file
     static GlmOcrConfig from_file(const std::string& filepath);
-    
-    // Save to JSON string
     std::string to_json() const;
 };
 

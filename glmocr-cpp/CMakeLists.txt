@@ -54,6 +54,9 @@ add_library(glmocr STATIC
     src/result_formatter.cpp
     src/pipeline.cpp
     src/layout_detector.cpp
+    src/doc_detector.cpp
+    src/orientation_detector.cpp
+    src/undistorter.cpp
     src/utils/image_utils.cpp
     src/utils/string_utils.cpp
     src/utils/base64.cpp
