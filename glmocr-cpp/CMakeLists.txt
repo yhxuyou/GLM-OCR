@@ -47,6 +47,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(stb)
 
+FetchContent_Declare(
+    yaml_cpp
+    GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+    GIT_TAG yaml-cpp-0.7.0
+)
+FetchContent_MakeAvailable(yaml_cpp)
+
 add_library(glmocr STATIC
     src/config.cpp
     src/page_loader.cpp
@@ -74,6 +81,7 @@ target_link_libraries(glmocr PUBLIC
     Threads::Threads
     CURL::libcurl
     nlohmann_json::nlohmann_json
+    yaml-cpp
 )
 
 # Link ONNX Runtime

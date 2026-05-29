@@ -33,7 +33,9 @@ std::string OCRClient::build_api_url() {
     if (config_.api_url) {
         return *config_.api_url;
     }
-    return config_.api_scheme + "://" + config_.api_host + ":" + 
+    std::string scheme = config_.api_scheme.has_value() ? *config_.api_scheme : 
+                         (config_.api_port == 443 ? "https" : "http");
+    return scheme + "://" + config_.api_host + ":" + 
            std::to_string(config_.api_port) + config_.api_path;
 }
 
@@ -70,7 +72,9 @@ bool OCRClient::is_alive(int timeout_seconds) {
     CURL* easy = curl_easy_init();
     if (!easy) return false;
     
-    std::string url = config_.api_scheme + "://" + config_.api_host + ":" + 
+    std::string scheme = config_.api_scheme.has_value() ? *config_.api_scheme : 
+                         (config_.api_port == 443 ? "https" : "http");
+    std::string url = scheme + "://" + config_.api_host + ":" + 
                       std::to_string(config_.api_port);
     
     curl_easy_setopt(easy, CURLOPT_URL, url.c_str());
@@ -145,7 +149,7 @@ json OCRClient::convert_to_ollama_format(const json& request) {
         }
     }
     
-    ollama_req["model"] = config_.model.value_or("glm-ocr:latest");
+    ollama_req["model"] = config_.model;
     ollama_req["prompt"] = prompt;
     ollama_req["stream"] = false;
     
@@ -225,8 +229,8 @@ OCRResponse OCRClient::process(const json& request_data) {
     }
     
     // Add model if configured
-    if (config_.model && !is_ollama) {
-        request["model"] = *config_.model;
+    if (!is_ollama) {
+        request["model"] = config_.model;
     }
     
     std::string json_str = request.dump();

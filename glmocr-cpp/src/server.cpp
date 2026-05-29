@@ -140,8 +140,8 @@ void ResultStore::cleanup(std::chrono::seconds max_age) {
 
 OcrServer::OcrServer(const GlmOcrConfig& config)
     : config_(config)
-    , host_(config.server_host)
-    , port_(config.server_port) {
+    , host_(config.server.host)
+    , port_(config.server.port) {
 
     pipeline_ = std::make_unique<Pipeline>(config.pipeline);
     result_store_ = std::make_unique<ResultStore>();

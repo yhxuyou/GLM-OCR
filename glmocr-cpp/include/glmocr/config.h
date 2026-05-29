@@ -8,12 +8,30 @@
 
 namespace glmocr {
 
+struct MaasConfig {
+    bool enabled = false;
+    std::string api_url = "https://open.bigmodel.cn/api/paas/v4/layout_parsing";
+    std::string model = "glm-ocr";
+    std::optional<std::string> api_key;
+    bool verify_ssl = true;
+    int connect_timeout = 30;
+    int request_timeout = 300;
+    int retry_max_attempts = 2;
+    float retry_backoff_base_seconds = 0.5f;
+    float retry_backoff_max_seconds = 8.0f;
+    float retry_jitter_ratio = 0.2f;
+    std::vector<int> retry_status_codes = {429, 500, 502, 503, 504};
+    int connection_pool_size = 16;
+};
+
 struct OCRApiConfig {
-    std::string api_host = "localhost";
+    std::string api_host = "127.0.0.1";
     int api_port = 8080;
-    std::string api_scheme = "http";
+    std::optional<std::string> api_scheme;
     std::string api_path = "/v1/chat/completions";
     std::optional<std::string> api_url;
+    std::string api_mode = "openai";
+    std::string model = "glm-ocr";
     std::optional<std::string> api_key;
     std::map<std::string, std::string> headers;
     bool verify_ssl = false;
@@ -25,8 +43,6 @@ struct OCRApiConfig {
     float retry_jitter_ratio = 0.2f;
     std::vector<int> retry_status_codes = {429, 500, 502, 503, 504};
     int connection_pool_size = 128;
-    std::string api_mode = "openai";
-    std::optional<std::string> model;
 };
 
 struct PageLoaderConfig {
@@ -88,7 +104,7 @@ struct LayoutConfig {
     std::optional<std::string> device;
     std::optional<int> img_size;
     bool layout_nms = true;
-    std::optional<std::string> layout_unclip_ratio;
+    std::optional<std::vector<float>> layout_unclip_ratio;
     std::string layout_merge_bboxes_mode = "large";
     std::optional<std::map<std::string, std::vector<std::string>>> label_task_mapping;
     bool use_polygon = false;
@@ -133,6 +149,7 @@ struct PreprocessConfig {
 };
 
 struct PipelineConfig {
+    MaasConfig maas;
     PageLoaderConfig page_loader;
     OCRApiConfig ocr_api;
     ResultFormatterConfig result_formatter;
@@ -143,19 +160,28 @@ struct PipelineConfig {
     int region_maxsize = 800;
 };
 
+struct LoggingConfig {
+    std::string level = "INFO";
+    std::optional<std::string> format;
+};
+
+struct ServerConfig {
+    std::string host = "0.0.0.0";
+    int port = 5002;
+    bool debug = false;
+};
+
 struct GlmOcrConfig {
     PipelineConfig pipeline;
-
-    std::string server_host = "0.0.0.0";
-    int server_port = 5002;
-    bool server_debug = false;
-
-    std::string log_level = "INFO";
-    std::optional<std::string> log_format;
+    ServerConfig server;
+    LoggingConfig logging;
 
     GlmOcrConfig() = default;
 
     static GlmOcrConfig from_json(const std::string& json_str);
+    static GlmOcrConfig from_json_file(const std::string& filepath);
+    static GlmOcrConfig from_yaml(const std::string& yaml_str);
+    static GlmOcrConfig from_yaml_file(const std::string& filepath);
     static GlmOcrConfig from_file(const std::string& filepath);
     std::string to_json() const;
 };

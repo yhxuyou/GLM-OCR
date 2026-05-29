@@ -44,8 +44,8 @@ int main(int argc, char* argv[]) {
             if (++i >= argc) { std::cerr << "--config requires argument\n"; return 1; }
             config = glmocr::GlmOcrConfig::from_file(argv[i]);
         }
-        else if (arg == "--host") { if (++i >= argc) return 1; config.server_host = argv[i]; }
-        else if (arg == "--port") { if (++i >= argc) return 1; config.server_port = std::stoi(argv[i]); }
+        else if (arg == "--host") { if (++i >= argc) return 1; config.server.host = argv[i]; }
+        else if (arg == "--port") { if (++i >= argc) return 1; config.server.port = std::stoi(argv[i]); }
         else if (arg == "--workers") { if (++i >= argc) return 1; config.pipeline.max_workers = std::stoi(argv[i]); }
         else if (arg == "--ocr-host") { if (++i >= argc) return 1; config.pipeline.ocr_api.api_host = argv[i]; }
         else if (arg == "--ocr-port") { if (++i >= argc) return 1; config.pipeline.ocr_api.api_port = std::stoi(argv[i]); }
