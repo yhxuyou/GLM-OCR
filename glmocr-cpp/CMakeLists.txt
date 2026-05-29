@@ -57,6 +57,7 @@ add_library(glmocr STATIC
     src/doc_detector.cpp
     src/orientation_detector.cpp
     src/undistorter.cpp
+    src/server.cpp
     src/utils/image_utils.cpp
     src/utils/string_utils.cpp
     src/utils/base64.cpp
@@ -66,6 +67,7 @@ target_include_directories(glmocr PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${stb_SOURCE_DIR}
     ${ONNXRUNTIME_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 
 target_link_libraries(glmocr PUBLIC
@@ -91,6 +93,9 @@ if(BUILD_EXAMPLES)
     
     add_executable(simple_example examples/simple.cpp)
     target_link_libraries(simple_example PRIVATE glmocr)
+
+    add_executable(glmocr_server examples/server_main.cpp)
+    target_link_libraries(glmocr_server PRIVATE glmocr)
 endif()
 
 if(BUILD_TESTS)
