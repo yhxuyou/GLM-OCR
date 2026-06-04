@@ -3,35 +3,58 @@
 Public surface::
 
     from glmocr.preprocess_pool import (
-        PreprocessPool,
-        DocumentPreprocessor,
-        Region,
+        # Pool + base contracts
+        PreprocessPool, DocumentPreprocessor, Region,
+        # 4-stage detector base classes
+        BaseDocumentDetector, BaseOrientationDetector,
+        BaseDistortionCorrector, LayoutDetectorAdapter,
+        DocumentBox, Orientation,
+        # Orchestrator
+        DocumentPreprocessorPipeline,
+        # Internals (rarely needed)
+        DocumentAggregator, DocumentResult, AsyncOCRDispatcher,
+        RegionDoneCallback, PreprocessTask, RegionTask, RegionError,
+        WORKER_STOP_SENTINEL,
     )
-
-Users implement a :class:`DocumentPreprocessor` that runs the four
-preprocessing stages (document detection, orientation detection,
-distortion correction, layout detection) and returns a list of
-:class:`Region` objects.  :class:`PreprocessPool` then takes care of
-fanning those regions out to a thread-pool-backed ``OCRClient`` and
-emitting a per-document callback when all regions of the same
-``document_id`` have been processed.
 """
 
 from .aggregator import DocumentAggregator, DocumentResult
 from .async_ocr import AsyncOCRDispatcher, RegionDoneCallback
+from .detectors import (
+    BaseDetector,
+    BaseDistortionCorrector,
+    BaseDocumentDetector,
+    BaseOrientationDetector,
+    DocumentBox,
+    LayoutDetectorAdapter,
+    Orientation,
+)
+from .pipeline import DocumentPreprocessorPipeline
 from .pool import PreprocessPool
 from .protocols import DocumentPreprocessor, Region
 from .tasks import (
+    WORKER_STOP_SENTINEL,
     PreprocessTask,
     RegionError,
     RegionTask,
-    WORKER_STOP_SENTINEL,
 )
 
 __all__ = [
+    # Pool + base
     "PreprocessPool",
     "DocumentPreprocessor",
     "Region",
+    # Detectors
+    "BaseDetector",
+    "BaseDocumentDetector",
+    "BaseOrientationDetector",
+    "BaseDistortionCorrector",
+    "LayoutDetectorAdapter",
+    "DocumentBox",
+    "Orientation",
+    # Orchestrator
+    "DocumentPreprocessorPipeline",
+    # Internals
     "DocumentAggregator",
     "DocumentResult",
     "AsyncOCRDispatcher",
