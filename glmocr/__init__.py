@@ -13,6 +13,7 @@ __all__ = [
     "layout",
     "postprocess",
     "utils",
+    "preprocess_pool",
     "Pipeline",
     "PipelineResult",
     "GlmOcrConfig",
@@ -20,11 +21,14 @@ __all__ = [
     "MaaSClient",
     "MissingApiKeyError",
     "GlmOcr",
+    "PreprocessPool",
+    "Region",
+    "DocumentPreprocessor",
     "parse",
 ]
 
 
-_LAZY_SUBMODULES = {"dataloader", "layout", "postprocess", "utils"}
+_LAZY_SUBMODULES = {"dataloader", "layout", "postprocess", "utils", "preprocess_pool"}
 _LAZY_ATTRS = {
     "Pipeline": ("pipeline", "Pipeline"),
     "PipelineResult": ("parser_result", "PipelineResult"),
@@ -33,6 +37,9 @@ _LAZY_ATTRS = {
     "MaaSClient": ("maas_client", "MaaSClient"),
     "MissingApiKeyError": ("maas_client", "MissingApiKeyError"),
     "GlmOcr": ("api", "GlmOcr"),
+    "PreprocessPool": ("preprocess_pool", "PreprocessPool"),
+    "Region": ("preprocess_pool", "Region"),
+    "DocumentPreprocessor": ("preprocess_pool", "DocumentPreprocessor"),
     "parse": ("api", "parse"),
 }
 
@@ -55,9 +62,10 @@ def __dir__():
 
 
 if TYPE_CHECKING:  # pragma: no cover
-    from . import dataloader, layout, postprocess, utils
+    from . import dataloader, layout, postprocess, preprocess_pool, utils
     from .api import GlmOcr, parse
     from .config import GlmOcrConfig, load_config
     from .maas_client import MaaSClient, MissingApiKeyError
     from .parser_result import PipelineResult
     from .pipeline import Pipeline
+    from .preprocess_pool import DocumentPreprocessor, PreprocessPool, Region

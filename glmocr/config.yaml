@@ -111,6 +111,27 @@ pipeline:
   page_maxsize: 100
   region_maxsize: 2000
 
+  # ============================================================================
+  # Preprocess Pool (optional)
+  # ============================================================================
+  # When users want to run their own multi-stage image preprocessing
+  # (document detection → orientation → distortion correction → layout
+  # detection) before calling the OCR backend, they can use
+  # ``glmocr.preprocess_pool.PreprocessPool`` with these settings:
+  preprocess_pool:
+    # Number of child processes that run the user preprocessor
+    # (one Preprocessor instance per process).
+    num_workers: 4
+    # Size of the thread pool used to call the OCR API asynchronously.
+    # Should be >= 8 to fully utilise a typical vLLM deployment.
+    ocr_max_workers: 32
+    # Bound on the cross-process input queue (preprocess tasks).
+    input_queue_maxsize: 200
+    # Bound on the cross-process output queue (region results).
+    output_queue_maxsize: 2000
+    # Seconds between reader-thread polls when the result queue is empty.
+    reader_poll_interval: 0.1
+
   # Page loader: handles image/PDF loading and API request building
   page_loader:
     # Generation parameters

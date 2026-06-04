@@ -248,6 +248,33 @@ class LayoutConfig(_BaseConfig):
         )
 
 
+class PreprocessPoolConfig(_BaseConfig):
+    """Configuration for the optional preprocess-pool subsystem.
+
+    The pool fans user-defined preprocessing (document detection, orientation
+    detection, distortion correction, layout detection) out across multiple
+    worker processes, then dispatches each detected region to the OCR backend
+    asynchronously and aggregates the results per document id.
+
+    See :mod:`glmocr.preprocess_pool` for details.
+    """
+
+    num_workers: int = 4
+    """Number of child processes that run the user preprocessor."""
+
+    ocr_max_workers: int = 32
+    """Size of the ThreadPoolExecutor used to call the OCR API."""
+
+    input_queue_maxsize: int = 200
+    """Bound on the cross-process input queue (preprocess tasks)."""
+
+    output_queue_maxsize: int = 2000
+    """Bound on the cross-process output queue (region results)."""
+
+    reader_poll_interval: float = 0.1
+    """Seconds between reader-thread polls when the queue is empty."""
+
+
 class PipelineConfig(_BaseConfig):
     # MaaS mode configuration (Zhipu cloud API passthrough)
     maas: MaaSApiConfig = Field(default_factory=MaaSApiConfig)
@@ -258,6 +285,7 @@ class PipelineConfig(_BaseConfig):
         default_factory=ResultFormatterConfig
     )
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
+    preprocess_pool: PreprocessPoolConfig = Field(default_factory=PreprocessPoolConfig)
 
     # Parallel recognition workers (VLM/API concurrent requests)
     max_workers: int = 16
