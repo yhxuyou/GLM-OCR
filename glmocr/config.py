@@ -275,6 +275,87 @@ class PreprocessPoolConfig(_BaseConfig):
     """Seconds between reader-thread polls when the queue is empty."""
 
 
+class FileFetcherConfig(_BaseConfig):
+    """Configuration for the file-fetcher subsystem.
+
+    Controls how the medical-bill server downloads images from the
+    upstream image-hosting system when ``file_type="file_id"``.
+    """
+
+    file_id_base_url: str = "http://localhost:9090/api/image"
+    """Base URL template for ``file_id``-based image fetching.
+
+    The fetcher will request ``{file_id_base_url}/{file_id}/{seq}``.
+    """
+
+    timeout: float = 30.0
+    """HTTP request timeout (seconds) per image download."""
+
+    retries: int = 2
+    """Number of retries on transient HTTP errors (408/429/5xx)."""
+
+    headers: Dict[str, str] = Field(default_factory=dict)
+    """Extra HTTP headers to send with each download request."""
+
+
+class MedicalExtractorConfig(_BaseConfig):
+    """Configuration for the medical-bill field extractor.
+
+    The extractor sends OCR markdown to the same vLLM backend and asks
+    it to return structured JSON matching ``BillRecord``.
+    """
+
+    prompt_template: str = (
+        "你是一个医疗票据信息抽取助手。请从以下OCR识别结果中抽取结构化字段，"
+        "以JSON格式返回，包含以下字段：\n"
+        "- bill_no: 票据编号\n"
+        "- hospital: 医院名称\n"
+        "- issue_date: 开票日期(YYYY-MM-DD)\n"
+        "- total_amount: 总金额\n"
+        "- self_pay: 自费金额\n"
+        "- insurance_pay: 医保统筹金额\n"
+        "- items: 项目明细列表，每项含name/quantity/unit_price/amount\n\n"
+        "OCR结果：\n{markdown}\n\n"
+        "请只返回JSON，不要添加其他文字。"
+    )
+    """Prompt template for the extraction LLM call.
+
+    Must contain ``{markdown}`` placeholder which will be replaced with
+    the OCR markdown text.
+    """
+
+    retry_count: int = 1
+    """Number of retries when LLM returns unparseable JSON."""
+
+    temperature: float = 0.0
+    """Temperature for the first extraction attempt."""
+
+    retry_temperature: float = 0.3
+    """Temperature for retry attempts (slightly higher to get different output)."""
+
+    match_date_window_days: int = 7
+    """Date window (±days) for matching bill ``issue_date`` to medical record
+    ``startDate``/``endDate`` in the aggregator."""
+
+
+class MedicalServerConfig(_BaseConfig):
+    """Configuration for the medical-bill FastAPI server."""
+
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+    max_concurrent_tasks: int = 50
+    """Upper bound on in-flight parse requests (back-pressure)."""
+
+    supported_file_types: List[str] = Field(
+        default_factory=lambda: ["file_id"]
+    )
+    """File types that the server accepts in ``file_list[].file_type``."""
+
+    file_fetcher: FileFetcherConfig = Field(default_factory=FileFetcherConfig)
+    extractor: MedicalExtractorConfig = Field(default_factory=MedicalExtractorConfig)
+
+
 class PipelineConfig(_BaseConfig):
     # MaaS mode configuration (Zhipu cloud API passthrough)
     maas: MaaSApiConfig = Field(default_factory=MaaSApiConfig)
@@ -391,6 +472,7 @@ class GlmOcrConfig(_BaseConfig):
     server: ServerConfig = Field(default_factory=ServerConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     pipeline: PipelineConfig = Field(default_factory=PipelineConfig)
+    medical_server: MedicalServerConfig = Field(default_factory=MedicalServerConfig)
 
     @classmethod
     def default_path(cls) -> str:

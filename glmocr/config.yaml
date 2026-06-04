@@ -329,3 +329,47 @@ pipeline:
       22: text
       23: vertical_text
       24: vision_footnote
+
+# ============================================================================
+# Medical Bill Server (FastAPI)
+# ============================================================================
+# When enabled, provides a PA_OCR-compatible HTTP endpoint for medical bill
+# parsing.  Internally uses PreprocessPool + OCR + field extraction +
+# case-level aggregation.
+medical_server:
+  host: "0.0.0.0"
+  port: 8080
+  max_concurrent_tasks: 50
+  supported_file_types:
+    - file_id
+
+  # File fetcher: how to download images by file_id
+  file_fetcher:
+    # Base URL for image hosting system.  The fetcher requests:
+    #   {file_id_base_url}/{file_id}/{seq}
+    file_id_base_url: "http://localhost:9090/api/image"
+    timeout: 30.0
+    retries: 2
+    headers: {}
+
+  # Medical bill field extractor (LLM-based)
+  extractor:
+    prompt_template: |
+      你是一个医疗票据信息抽取助手。请从以下OCR识别结果中抽取结构化字段，
+      以JSON格式返回，包含以下字段：
+      - bill_no: 票据编号
+      - hospital: 医院名称
+      - issue_date: 开票日期(YYYY-MM-DD)
+      - total_amount: 总金额
+      - self_pay: 自费金额
+      - insurance_pay: 医保统筹金额
+      - items: 项目明细列表，每项含name/quantity/unit_price/amount
+
+      OCR结果：
+      {markdown}
+
+      请只返回JSON，不要添加其他文字。
+    retry_count: 1
+    temperature: 0.0
+    retry_temperature: 0.3
+    match_date_window_days: 7

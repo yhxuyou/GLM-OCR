@@ -25,6 +25,10 @@ __all__ = [
     "Region",
     "DocumentPreprocessor",
     "parse",
+    "BillRecord",
+    "BillItem",
+    "MedicalAggregator",
+    "MedicalFieldExtractor",
 ]
 
 
@@ -41,6 +45,10 @@ _LAZY_ATTRS = {
     "Region": ("preprocess_pool", "Region"),
     "DocumentPreprocessor": ("preprocess_pool", "DocumentPreprocessor"),
     "parse": ("api", "parse"),
+    "BillRecord": ("medical_extractor", "BillRecord"),
+    "BillItem": ("medical_extractor", "BillItem"),
+    "MedicalAggregator": ("medical_aggregator", "MedicalAggregator"),
+    "MedicalFieldExtractor": ("medical_extractor", "MedicalFieldExtractor"),
 }
 
 
@@ -66,6 +74,8 @@ if TYPE_CHECKING:  # pragma: no cover
     from .api import GlmOcr, parse
     from .config import GlmOcrConfig, load_config
     from .maas_client import MaaSClient, MissingApiKeyError
+    from .medical_aggregator import MedicalAggregator
+    from .medical_extractor import BillItem, BillRecord, MedicalFieldExtractor
     from .parser_result import PipelineResult
     from .pipeline import Pipeline
     from .preprocess_pool import DocumentPreprocessor, PreprocessPool, Region
