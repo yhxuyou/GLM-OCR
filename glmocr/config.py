@@ -50,6 +50,8 @@ _ENV_MAP: Dict[str, str] = {
     "LAYOUT_DEVICE": "pipeline.layout.device",
     # Logging
     "LOG_LEVEL": "logging.level",
+    # Redis
+    "REDIS_URL": "pipeline.redis.url",
 }
 
 PRIMARY_API_KEY_ENV = "ZHIPU_API_KEY"
@@ -248,6 +250,14 @@ class LayoutConfig(_BaseConfig):
         )
 
 
+class RedisConfig(_BaseConfig):
+    """Redis connection and caching configuration."""
+
+    url: str = "redis://localhost:6379/0"
+    key_prefix: str = "glmocr"
+    max_connections: int = 10
+
+
 class PipelineConfig(_BaseConfig):
     # MaaS mode configuration (Zhipu cloud API passthrough)
     maas: MaaSApiConfig = Field(default_factory=MaaSApiConfig)
@@ -258,6 +268,7 @@ class PipelineConfig(_BaseConfig):
         default_factory=ResultFormatterConfig
     )
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
+    redis: RedisConfig = Field(default_factory=RedisConfig)
 
     # Parallel recognition workers (VLM/API concurrent requests)
     max_workers: int = 16
@@ -456,6 +467,8 @@ class GlmOcrConfig(_BaseConfig):
             # Layout GPU binding
             "cuda_visible_devices": "pipeline.layout.cuda_visible_devices",
             "layout_device": "pipeline.layout.device",
+            # Redis
+            "redis_url": "pipeline.redis.url",
         }
 
         # `model` is shared by both MaaS and self-hosted modes.

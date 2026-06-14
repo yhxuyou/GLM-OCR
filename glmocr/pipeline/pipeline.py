@@ -15,10 +15,12 @@ Extension points:
 
 from __future__ import annotations
 
+import asyncio
 import time
 import threading
 from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional
 
+from glmocr.aggregator import RegionAggregator
 from glmocr.dataloader import PageLoader
 from glmocr.ocr_client import OCRClient
 from glmocr.parser_result import PipelineResult
@@ -191,6 +193,224 @@ class Pipeline:
             self._current_state = None
 
         state.raise_if_exceptions()
+
+    # ------------------------------------------------------------------
+    # Async Pipeline Support
+    # ------------------------------------------------------------------
+
+    async def process_async(
+        self,
+        request_data: Dict[str, Any],
+        doc_id: str,
+        aggregator: RegionAggregator,
+        save_layout_visualization: bool = False,
+    ) -> str:
+        """Process a request asynchronously and return immediately.
+
+        This method performs layout detection synchronously, then submits all
+        regions to vLLM asynchronously without waiting for results. The
+        ``doc_id`` is returned immediately, and results can be retrieved later
+        via the ``aggregator``.
+
+        Args:
+            request_data: OpenAI-style request payload containing messages.
+            doc_id: Unique identifier for this document.
+            aggregator: RegionAggregator instance to track progress.
+            save_layout_visualization: Generate layout visualisation images.
+
+        Returns:
+            The ``doc_id`` for tracking progress.
+        """
+        image_sources = extract_image_sources(request_data)
+
+        if not image_sources:
+            # No images - process synchronously and store result
+            result = self._process_passthrough(request_data)
+            await aggregator.register_document(doc_id, total_regions=1)
+            await aggregator.on_region_complete(
+                doc_id,
+                "passthrough",
+                {
+                    "json_result": result.json_result,
+                    "markdown_result": result.markdown_result,
+                },
+            )
+            return doc_id
+
+        # Load all pages
+        pages = []
+        for page, _ in self.page_loader.iter_pages_with_unit_indices(image_sources):
+            pages.append(page)
+
+        if not pages:
+            await aggregator.register_document(doc_id, total_regions=1)
+            await aggregator.on_region_complete(
+                doc_id,
+                "empty",
+                {"json_result": None, "markdown_result": ""},
+            )
+            return doc_id
+
+        # Run layout detection on all pages
+        all_regions = []
+        for page_idx, page in enumerate(pages):
+            try:
+                layout_results, vis_images = self.layout_detector.process(
+                    [page],
+                    save_visualization=save_layout_visualization,
+                    global_start_idx=page_idx,
+                    use_polygon=self.config.layout.use_polygon,
+                )
+                if layout_results:
+                    for region in layout_results[0]:
+                        all_regions.append({
+                            "page_idx": page_idx,
+                            "page": page,
+                            "region": region,
+                        })
+            except Exception as e:
+                logger.warning(
+                    "Layout detection failed for page %d, skipping: %s",
+                    page_idx,
+                    e,
+                )
+
+        # Register document with aggregator
+        total_regions = len(all_regions)
+        if total_regions == 0:
+            total_regions = 1  # At least one region to avoid ValueError
+
+        await aggregator.register_document(doc_id, total_regions=total_regions)
+
+        if not all_regions:
+            await aggregator.on_region_complete(
+                doc_id,
+                "no_regions",
+                {"json_result": None, "markdown_result": ""},
+            )
+            return doc_id
+
+        # Submit all regions asynchronously
+        tasks = []
+        for idx, region_info in enumerate(all_regions):
+            region_id = f"region_{idx}"
+            task = asyncio.create_task(
+                self._submit_region_async(doc_id, region_id, region_info, aggregator)
+            )
+            tasks.append(task)
+
+        # Wait for all submissions to complete (but not for OCR results)
+        # The tasks will continue running in the background
+        logger.info(
+            "Submitted %d regions for document %s asynchronously",
+            len(tasks),
+            doc_id,
+        )
+
+        return doc_id
+
+    async def _submit_region_async(
+        self,
+        doc_id: str,
+        region_id: str,
+        region_info: Dict[str, Any],
+        aggregator: RegionAggregator,
+    ) -> None:
+        """Submit a single region to vLLM asynchronously.
+
+        Args:
+            doc_id: Document identifier.
+            region_id: Region identifier within the document.
+            region_info: Dictionary containing page, region, and cropped image info.
+            aggregator: RegionAggregator to notify on completion.
+        """
+        page_idx = region_info["page_idx"]
+        page = region_info["page"]
+        region = region_info["region"]
+
+        try:
+            # Handle skip task types
+            if region.get("task_type") == "skip":
+                region["content"] = None
+                result = {
+                    "page_idx": page_idx,
+                    "region": region,
+                    "content": None,
+                }
+                await aggregator.on_region_complete(doc_id, region_id, result)
+                return
+
+            # Crop the image for this region
+            from glmocr.utils.image_utils import crop_image_region
+
+            try:
+                polygon = region.get("polygon") if self.config.layout.use_polygon else None
+                cropped_image = crop_image_region(
+                    page, region["bbox_2d"], polygon
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to crop region on page %d (bbox=%s), skipping: %s",
+                    page_idx,
+                    region.get("bbox_2d"),
+                    e,
+                )
+                region["content"] = ""
+                result = {
+                    "page_idx": page_idx,
+                    "region": region,
+                    "content": "",
+                }
+                await aggregator.on_region_complete(doc_id, region_id, result)
+                return
+
+            # Build request from cropped image
+            request_data = self.page_loader.build_request_from_image(
+                cropped_image,
+                region.get("task_type", "text"),
+            )
+
+            # Submit OCR request in a thread pool to avoid blocking
+            loop = asyncio.get_event_loop()
+            response, status_code = await loop.run_in_executor(
+                None, self.ocr_client.process, request_data
+            )
+
+            # Process response
+            if status_code == 200:
+                content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+                region["content"] = content.strip() if content else ""
+            else:
+                logger.warning(
+                    "Recognition failed for page %d region %s: HTTP %s",
+                    page_idx,
+                    region_id,
+                    status_code,
+                )
+                region["content"] = None
+
+            result = {
+                "page_idx": page_idx,
+                "region": region,
+                "content": region.get("content"),
+            }
+            await aggregator.on_region_complete(doc_id, region_id, result)
+
+        except Exception as e:
+            logger.error(
+                "Async region submission failed for doc=%s region=%s: %s",
+                doc_id,
+                region_id,
+                e,
+            )
+            # Mark region as failed
+            result = {
+                "page_idx": page_idx,
+                "region": region,
+                "content": None,
+                "error": str(e),
+            }
+            await aggregator.on_region_complete(doc_id, region_id, result)
 
     def get_queue_stats(self) -> Optional[Dict[str, int]]:
         """Return current queue sizes, or ``None`` if no processing is active."""
