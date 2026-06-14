@@ -56,11 +56,13 @@
 - [ ] 11.2 创建 `postprocess/config.yaml` - 后处理配置示例
 - [ ] 11.3 更新 `glmocr/config.yaml` - 添加预处理/后处理配置段
 
-## Task 12: 创建 Docker 部署文件
-- [ ] 12.1 创建 `preprocess/Dockerfile`
-- [ ] 12.2 创建 `postprocess/Dockerfile`
-- [ ] 12.3 创建 `docker-compose.preprocess.yml` - 独立部署
-- [ ] 12.4 创建 `docker-compose.full.yml` - 完整部署
+## Task 12: 创建进程管理配置
+- [x] 12.1 创建 `supervisor/supervisord.conf` - Supervisor 主配置
+- [x] 12.2 创建 `supervisor/conf.d/preprocess.conf` - 预处理服务配置
+- [x] 12.3 创建 `supervisor/conf.d/glmocr-async.conf` - GLM OCR 服务配置
+- [x] 12.4 创建 `supervisor/conf.d/postprocess.conf` - 后处理服务配置
+- [x] 12.5 创建 `supervisor/generate_configs.py` - 配置生成器
+- [x] 12.6 创建 `supervisor/manage.sh` - 服务管理脚本
 
 ## Task 13: 编写测试
 - [ ] 13.1 编写预处理服务单元测试

@@ -1,29 +1,29 @@
 # 预处理与后处理微服务检查清单
 
 ## 预处理服务
-- [ ] `preprocess/` 目录已创建
-- [ ] `preprocess/config.py` 已创建，包含预处理配置类
-- [ ] `preprocess/models/` 目录已创建，包含模型加载器基类
-- [ ] `preprocess/doc_detector.py` 已创建，实现文档边界检测
-- [ ] `preprocess/orientation_corrector.py` 已创建，实现方向矫正
-- [ ] `preprocess/dewarp_corrector.py` 已创建，实现扭曲矫正
-- [ ] `preprocess/pipeline.py` 已创建，实现串行流水线
-- [ ] `preprocess/server.py` 已创建，FastAPI 服务入口
-- [ ] `/detect` 端点已实现
-- [ ] `/orient` 端点已实现
-- [ ] `/dewarp` 端点已实现
-- [ ] `/preprocess` 端点已实现（完整流水线）
-- [ ] `/health` 端点已实现
-- [ ] `preprocess/config.yaml` 已创建
+- [x] `preprocess/` 目录已创建
+- [x] `preprocess/config.py` 已创建，包含预处理配置类
+- [x] `preprocess/models/` 目录已创建，包含模型加载器基类
+- [x] `preprocess/doc_detector.py` 已创建，实现文档边界检测
+- [x] `preprocess/orientation_corrector.py` 已创建，实现方向矫正
+- [x] `preprocess/dewarp_corrector.py` 已创建，实现扭曲矫正
+- [x] `preprocess/pipeline.py` 已创建，实现串行流水线
+- [x] `preprocess/server.py` 已创建，FastAPI 服务入口
+- [x] `/detect` 端点已实现
+- [x] `/orient` 端点已实现
+- [x] `/dewarp` 端点已实现
+- [x] `/preprocess` 端点已实现（完整流水线）
+- [x] `/health` 端点已实现
+- [x] `preprocess/config.yaml` 已创建
 - [ ] `preprocess/Dockerfile` 已创建
 - [ ] `preprocess/README.md` 已创建
 
 ## 后处理服务
-- [ ] `postprocess/` 目录已创建
-- [ ] `postprocess/processor.py` 已创建，实现后处理逻辑
-- [ ] `postprocess/server.py` 已创建，FastAPI 服务入口
-- [ ] `/postprocess` 端点已实现
-- [ ] `/health` 端点已实现
+- [x] `postprocess/` 目录已创建
+- [x] `postprocess/processor.py` 已创建，实现后处理逻辑
+- [x] `postprocess/server.py` 已创建，FastAPI 服务入口
+- [x] `/postprocess` 端点已实现
+- [x] `/health` 端点已实现
 - [ ] `postprocess/config.yaml` 已创建
 - [ ] `postprocess/Dockerfile` 已创建
 - [ ] `postprocess/README.md` 已创建
@@ -44,6 +44,16 @@
 ## Docker 部署
 - [ ] `docker-compose.preprocess.yml` 已创建（独立部署）
 - [ ] `docker-compose.full.yml` 已创建（完整部署）
+
+## Supervisor 进程管理
+- [x] `supervisor/supervisord.conf` 已创建（Supervisor 主配置）
+- [x] `supervisor/conf.d/preprocess.conf` 已创建（预处理服务配置）
+- [x] `supervisor/conf.d/glmocr-async.conf` 已创建（GLM OCR 服务配置）
+- [x] `supervisor/conf.d/postprocess.conf` 已创建（后处理服务配置）
+- [x] `supervisor/generate_configs.py` 已创建（配置生成器）
+- [x] `supervisor/manage.sh` 已创建（服务管理脚本）
+- [x] 支持灵活调整各服务进程数量
+- [x] 支持动态扩缩容
 
 ## 测试
 - [ ] 预处理服务单元测试已编写
