@@ -1,5 +1,33 @@
 # GLM-OCR 异步服务文档
 
+## 目录
+
+- [一、启动方式](#一启动方式)
+  - [1.1 前置依赖](#11-前置依赖)
+  - [1.2 启动 Redis](#12-启动-redis)
+  - [1.3 配置文件](#13-配置文件)
+  - [1.4 启动服务](#14-启动服务)
+  - [1.5 验证启动](#15-验证启动)
+- [二、数据流程调用说明](#二数据流程调用说明)
+  - [2.1 整体架构图](#21-整体架构图)
+  - [2.2 详细数据流程](#22-详细数据流程)
+- [三、20 个并发调用的数据处理](#三20-个并发调用的数据处理)
+  - [3.1 并发场景描述](#31-并发场景描述)
+  - [3.2 并发处理流程](#32-并发处理流程)
+  - [3.3 并发控制机制](#33-并发控制机制)
+  - [3.4 并发性能指标](#34-并发性能指标)
+  - [3.5 并发场景下的资源消耗](#35-并发场景下的资源消耗)
+  - [3.6 调优建议](#36-调优建议)
+- [四、预处理与后处理服务](#四预处理与后处理服务)
+  - [4.1 预处理服务](#41-预处理服务)
+  - [4.2 后处理服务](#42-后处理服务)
+  - [4.3 完整部署架构](#43-完整部署架构)
+- [五、API 参考](#五api-参考)
+- [六、故障排查](#六故障排查)
+- [七、配置参考](#七配置参考)
+
+---
+
 ## 一、启动方式
 
 ### 1.1 前置依赖
@@ -427,7 +455,271 @@ pipeline:
 
 ---
 
-## 四、API 参考
+## 四、预处理与后处理服务
+
+### 4.1 预处理服务
+
+预处理服务提供文档图像的预处理能力，包括文档检测、方向矫正和扭曲矫正。
+
+#### 4.1.1 启动预处理服务
+
+```bash
+# 方式一：直接启动
+python -m preprocess.server --config preprocess/config.yaml
+
+# 方式二：使用环境变量
+export PREPROCESS_DEVICE=cuda:0
+export PREPROCESS_PORT=5003
+python -m preprocess.server
+```
+
+#### 4.1.2 预处理 API
+
+**单步骤调用**：
+
+```bash
+# 文档检测
+curl -X POST http://localhost:5003/detect \
+  -F "file=@document.jpg"
+
+# 方向矫正
+curl -X POST http://localhost:5003/orient \
+  -F "file=@document.jpg" \
+  -F "apply_rotation=true"
+
+# 扭曲矫正
+curl -X POST http://localhost:5003/dewarp \
+  -F "file=@document.jpg"
+```
+
+**完整流水线**：
+
+```bash
+# 串行执行：文档检测 → 方向矫正 → 扭曲矫正
+curl -X POST http://localhost:5003/preprocess \
+  -F "file=@document.jpg" \
+  -F "return_intermediate=true"
+```
+
+**响应示例**：
+
+```json
+{
+  "original_size": [1920, 1080],
+  "final_size": [1800, 900],
+  "final_image": "base64_encoded_image...",
+  "steps": [
+    {
+      "step": "doc_detection",
+      "result": {
+        "bbox": [100, 100, 1820, 980],
+        "confidence": 0.95
+      }
+    },
+    {
+      "step": "orientation_correction",
+      "result": {
+        "angle": 0,
+        "confidence": 0.99
+      }
+    },
+    {
+      "step": "dewarp_correction",
+      "result": {
+        "original_size": [1720, 880],
+        "corrected_size": [1800, 900]
+      }
+    }
+  ]
+}
+```
+
+#### 4.1.3 GPU 模型部署
+
+预处理服务支持多种 GPU 模型格式：
+
+**PyTorch 模型**：
+```python
+# preprocess/models/doc_detector.py
+self._model = torch.load(f"{model_dir}/model.pth", map_location=self._device)
+self._model.eval()
+```
+
+**Hugging Face 模型**：
+```python
+from transformers import AutoModel
+self._model = AutoModel.from_pretrained(model_dir).to(self._device)
+```
+
+**ONNX 模型**：
+```python
+import onnxruntime as ort
+self._model = ort.InferenceSession(f"{model_dir}/model.onnx")
+```
+
+**TensorRT 模型**：
+```python
+import tensorrt as trt
+# TRT 加载逻辑
+```
+
+### 4.2 后处理服务
+
+后处理服务对 OCR 结果进行格式化和优化。
+
+#### 4.2.1 启动后处理服务
+
+```bash
+python -m postprocess.server --config postprocess/config.yaml
+```
+
+#### 4.2.2 后处理 API
+
+```bash
+curl -X POST http://localhost:5004/postprocess \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "识别的文本内容...",
+    "format": "markdown",
+    "options": {
+      "remove_extra_whitespace": true,
+      "normalize_unicode": true
+    }
+  }'
+```
+
+**响应示例**：
+
+```json
+{
+  "original_text": "识别的文本内容...",
+  "processed_text": "格式化后的文本...",
+  "format": "markdown",
+  "metadata": {
+    "processing_time_ms": 15,
+    "operations_applied": ["remove_whitespace", "normalize_unicode"]
+  }
+}
+```
+
+### 4.3 完整部署架构
+
+#### 4.3.1 独立部署模式
+
+```
+┌─────────────────┐
+│  预处理服务      │  GPU 0
+│  :5003          │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  OCR 服务        │  GPU 1
+│  :8000          │
+└────────┬────────┘
+         │
+┌────────▼────────┐
+│  后处理服务      │  CPU
+│  :5004          │
+└─────────────────┘
+```
+
+**启动命令**：
+
+```bash
+# 终端 1：启动预处理服务
+python -m preprocess.server --port 5003
+
+# 终端 2：启动 OCR 服务
+python -m glmocr.async_server --port 8000
+
+# 终端 3：启动后处理服务
+python -m postprocess.server --port 5004
+```
+
+#### 4.3.2 Docker Compose 部署
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  preprocess:
+    build: ./preprocess
+    ports:
+      - "5003:5003"
+    environment:
+      - PREPROCESS_DEVICE=cuda:0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+  
+  ocr-service:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - GLMOCR_REDIS_URL=redis://redis:6379/0
+      - GLMOCR_OCR_API_HOST=vllm
+      - GLMOCR_OCR_API_PORT=5002
+    depends_on:
+      - redis
+      - preprocess
+  
+  postprocess:
+    build: ./postprocess
+    ports:
+      - "5004:5004"
+    depends_on:
+      - ocr-service
+  
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+```
+
+**启动命令**：
+
+```bash
+docker-compose up -d
+```
+
+#### 4.3.3 集成到 AsyncPipeline
+
+在 `config.yaml` 中启用预处理和后处理：
+
+```yaml
+pipeline:
+  # 预处理配置
+  preprocess:
+    enabled: true
+    service_url: http://localhost:5003
+    timeout: 30
+  
+  # 后处理配置
+  postprocess:
+    enabled: true
+    service_url: http://localhost:5004
+    timeout: 10
+```
+
+**数据流程**：
+
+```
+原始图像 → 预处理服务 → OCR 服务 → 后处理服务 → 最终结果
+   │           │            │            │
+   │      文档检测       布局检测      文本格式化
+   │      方向矫正       文字识别      结构优化
+   │      扭曲矫正       表格识别
+```
+
+---
+
+## 五、API 参考
 
 ### 4.1 POST /parse/async
 
