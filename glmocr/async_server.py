@@ -26,8 +26,8 @@ except ImportError as e:  # pragma: no cover
     _FASTAPI_IMPORT_ERROR = e
 
 from glmocr.aggregator import RegionAggregator
+from glmocr.async_pipeline import AsyncPipeline
 from glmocr.config import GlmOcrConfig, load_config
-from glmocr.pipeline import Pipeline
 from glmocr.utils.logging import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -62,11 +62,11 @@ def create_app(config: GlmOcrConfig) -> FastAPI:
         """Initialize pipeline and aggregator on application startup."""
         logger.info("Starting GLM-OCR Async Server...")
 
-        # Initialize Pipeline
-        pipeline = Pipeline(config=config.pipeline)
-        pipeline.start()
+        # Initialize AsyncPipeline
+        pipeline = AsyncPipeline(config=config.pipeline)
+        await pipeline.start()
         app.state.pipeline = pipeline
-        logger.info("Pipeline initialized")
+        logger.info("AsyncPipeline initialized")
 
         # Initialize RegionAggregator
         redis_config = config.pipeline.redis
@@ -88,8 +88,8 @@ def create_app(config: GlmOcrConfig) -> FastAPI:
 
         # Stop pipeline
         if hasattr(app.state, "pipeline"):
-            app.state.pipeline.stop()
-            logger.info("Pipeline stopped")
+            await app.state.pipeline.stop()
+            logger.info("AsyncPipeline stopped")
 
         # Disconnect aggregator
         if hasattr(app.state, "aggregator"):
@@ -323,16 +323,16 @@ async def _process_document_background(
     doc_id: str,
     file_content: bytes,
     filename: str,
-    pipeline: Pipeline,
+    pipeline: AsyncPipeline,
     aggregator: RegionAggregator,
 ) -> None:
-    """Background task to process a document and update aggregator.
+    """Background task to process a document using AsyncPipeline.
 
     Args:
         doc_id: Document identifier.
         file_content: Raw file content (bytes).
         filename: Original filename.
-        pipeline: Pipeline instance for processing.
+        pipeline: AsyncPipeline instance for processing.
         aggregator: RegionAggregator for tracking progress.
     """
     try:
@@ -365,31 +365,11 @@ async def _process_document_background(
             ]
             request_data = {"messages": messages}
 
-            # Process document (pipeline.process() is a generator)
-            # Run in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None,
-                lambda: list(pipeline.process(request_data)),
-            )
+            # Use AsyncPipeline's process_async method
+            # This will submit regions to vLLM asynchronously and return immediately
+            await pipeline.process_async(request_data, doc_id, aggregator)
 
-            if not results:
-                logger.warning("No results produced for doc %s", doc_id)
-                # Mark as complete with empty result
-                await aggregator.on_region_complete(doc_id, "empty", {})
-                return
-
-            # Process each result (one per input unit)
-            for idx, result in enumerate(results):
-                region_id = f"unit_{idx}"
-                region_result = {
-                    "json_result": result.json_result,
-                    "markdown_result": result.markdown_result or "",
-                    "original_images": result.original_images,
-                }
-                await aggregator.on_region_complete(doc_id, region_id, region_result)
-
-            logger.info("Background processing complete for doc %s", doc_id)
+            logger.info("Background processing submitted for doc %s", doc_id)
 
         finally:
             # Cleanup temporary file

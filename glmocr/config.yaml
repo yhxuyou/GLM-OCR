@@ -104,6 +104,27 @@ pipeline:
     # "Connection pool is full" when runs concurrent requests.
     connection_pool_size: 128
 
+  # ============================================================================
+  # Async OCR Client Configuration
+  # ============================================================================
+  # Configuration for async httpx-based OCR client.
+  # These settings control connection pooling and concurrency for async operations.
+  async_ocr:
+    # httpx connection pool size
+    max_connections: 100
+    # Maximum concurrent requests (semaphore limit)
+    max_concurrent_requests: 50
+
+  # ============================================================================
+  # Async Pipeline Configuration
+  # ============================================================================
+  # Configuration for async pipeline concurrency and batch processing.
+  async_pipeline:
+    # Maximum concurrent regions processed in parallel
+    max_concurrent_regions: 100
+    # Whether to enable batch processing of regions
+    enable_batch_processing: true
+
   # Maximum parallel workers for region recognition
   # Lower values to reduce 503 errors on busy OCR servers
   max_workers: 32
