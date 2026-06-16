@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import io
 from typing import Any, Dict, Optional
@@ -328,16 +329,29 @@ async def preprocess_batch(
 
 def main():
     """主函数：启动服务"""
+    parser = argparse.ArgumentParser(description="Preprocess Server")
+    parser.add_argument("--host", type=str, default=None, help="Host to bind to")
+    parser.add_argument("--port", type=int, default=None, help="Port to bind to")
+    parser.add_argument("--workers", type=int, default=2, help="Number of Uvicorn worker processes")
+    args = parser.parse_args()
+    
     config = load_config()
     configure_logging(level=config.logging.level)
     
-    logger.info(f"启动预处理微服务: {config.server.host}:{config.server.port}")
+    # 覆盖配置
+    if args.host:
+        config.server.host = args.host
+    if args.port:
+        config.server.port = args.port
+    
+    logger.info(f"启动预处理微服务: {config.server.host}:{config.server.port} (workers={args.workers})")
     
     uvicorn.run(
         app,
         host=config.server.host,
         port=config.server.port,
-        log_level=config.logging.level.lower()
+        log_level=config.logging.level.lower(),
+        workers=args.workers,
     )
 
 

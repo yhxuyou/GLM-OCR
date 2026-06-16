@@ -3,6 +3,7 @@
 提供后处理 HTTP 接口，支持单个和批量处理。
 """
 
+import argparse
 import logging
 from typing import Any, Dict, List, Optional, Union
 from contextlib import asynccontextmanager
@@ -262,11 +263,24 @@ def run_server():
     """运行服务"""
     import uvicorn
     
+    parser = argparse.ArgumentParser(description="Postprocess Server")
+    parser.add_argument("--host", type=str, default=None, help="Host to bind to")
+    parser.add_argument("--port", type=int, default=None, help="Port to bind to")
+    parser.add_argument("--workers", type=int, default=2, help="Number of Uvicorn worker processes")
+    args = parser.parse_args()
+    
+    # 覆盖配置
+    host = args.host or config.host
+    port = args.port or config.port
+    
+    logger.info(f"启动后处理微服务: {host}:{port} (workers={args.workers})")
+    
     uvicorn.run(
         "postprocess.server:app",
-        host=config.host,
-        port=config.port,
-        reload=config.debug
+        host=host,
+        port=port,
+        reload=config.debug,
+        workers=args.workers,
     )
 
 

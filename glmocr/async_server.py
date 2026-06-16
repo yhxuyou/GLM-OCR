@@ -398,6 +398,9 @@ def main():
         "--port", type=int, default=None, help="Port to bind to"
     )
     parser.add_argument(
+        "--workers", type=int, default=4, help="Number of Uvicorn worker processes"
+    )
+    parser.add_argument(
         "--log-level",
         type=str,
         default=None,
@@ -453,6 +456,7 @@ def main():
             host=config.server.host,
             port=config.server.port,
             log_level=log_level.lower(),
+            workers=args.workers,
         )
 
     except KeyboardInterrupt:
