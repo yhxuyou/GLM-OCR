@@ -73,11 +73,10 @@ class PipelineService:
         doc_id = await self.glmocr_client.submit(image_b64, filename=filename)
         logger.info(f"[Pipeline] 提交成功, doc_id={doc_id}")
 
-        # 2.2 轮询等待完成
+        # 2.2 等待完成（优先 WebSocket，降级轮询）
         timeout = timeout or self.config.poll_timeout
         result = await self.glmocr_client.wait_for_completion(
             doc_id,
-            poll_interval=self.config.poll_interval,
             timeout=timeout,
         )
         logger.info(f"[Pipeline] GLM-OCR 完成, doc_id={doc_id}")

@@ -70,11 +70,18 @@ class PreprocessClient:
 
 
 class GLMOCRClient:
-    """GLM-OCR 异步服务客户端"""
+    """GLM-OCR 异步服务客户端
+
+    支持两种等待模式：
+    - WebSocket（默认）：连接 /ws/{doc_id}，服务端主动推送进度和结果，零无效查询
+    - HTTP 轮询（降级）：当 WebSocket 不可用时自动降级为轮询
+    """
 
     def __init__(self, config: PipelineConfig):
         self.base_url = config.glmocr.base_url
         self.timeout = httpx.Timeout(60.0, connect=10.0)
+        self.poll_interval = config.poll_interval
+        self.poll_timeout = config.poll_timeout
 
     async def submit(
         self,
@@ -93,7 +100,6 @@ class GLMOCRClient:
         Raises:
             ServiceClientError: 提交失败
         """
-        # 将 base64 解码为字节流
         try:
             image_bytes = base64.b64decode(image_b64)
         except Exception as e:
@@ -153,14 +159,12 @@ class GLMOCRClient:
     async def wait_for_completion(
         self,
         doc_id: str,
-        poll_interval: float = 1.0,
-        timeout: float = 300.0,
+        timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
-        """轮询等待任务完成
+        """等待任务完成（优先使用 WebSocket，降级为轮询）
 
         Args:
             doc_id: 文档 ID
-            poll_interval: 轮询间隔（秒）
             timeout: 总超时（秒）
 
         Returns:
@@ -169,7 +173,94 @@ class GLMOCRClient:
         Raises:
             ServiceClientError: 超时或失败
         """
+        timeout = timeout or self.poll_timeout
+        try:
+            return await self._wait_via_websocket(doc_id, timeout)
+        except Exception as e:
+            logger.warning(
+                f"WebSocket 等待失败，降级为轮询: {e}"
+            )
+            return await self._wait_via_polling(doc_id, timeout)
+
+    async def _wait_via_websocket(
+        self,
+        doc_id: str,
+        timeout: float,
+    ) -> Dict[str, Any]:
+        """通过 WebSocket 等待任务完成
+
+        连接 /ws/{doc_id}，服务端主动推送进度更新和最终结果。
+        零无效查询，比轮询高效得多。
+
+        Args:
+            doc_id: 文档 ID
+            timeout: 总超时（秒）
+
+        Returns:
+            最终的 OCR 结果
+        """
+        import websockets
+
+        # http://host:port → ws://host:port
+        ws_url = f"ws://{self.base_url.split('://', 1)[1]}/ws/{doc_id}"
+
+        try:
+            async with websockets.connect(
+                ws_url,
+                close_timeout=5,
+                open_timeout=10,
+            ) as ws:
+                # 设置总超时
+                while True:
+                    try:
+                        raw = await asyncio.wait_for(
+                            ws.recv(), timeout=timeout
+                        )
+                    except asyncio.TimeoutError:
+                        raise ServiceClientError(
+                            f"WebSocket 等待超时 (>{timeout}s): {doc_id}"
+                        )
+
+                    import json
+                    msg = json.loads(raw)
+                    msg_type = msg.get("type")
+
+                    if msg_type == "progress":
+                        logger.info(
+                            f"[doc_id={doc_id}] 进度: "
+                            f"{msg['completed']}/{msg['total']}"
+                        )
+                    elif msg_type == "complete":
+                        logger.info(f"[doc_id={doc_id}] 处理完成")
+                        return msg["result"]
+                    elif msg_type == "error":
+                        raise ServiceClientError(
+                            f"服务端错误: {msg.get('message', 'unknown')}"
+                        )
+
+        except ServiceClientError:
+            raise
+        except Exception as e:
+            raise ServiceClientError(f"WebSocket 连接失败: {e}") from e
+
+    async def _wait_via_polling(
+        self,
+        doc_id: str,
+        timeout: float,
+    ) -> Dict[str, Any]:
+        """轮询等待任务完成（指数退避）
+
+        Args:
+            doc_id: 文档 ID
+            timeout: 总超时（秒）
+
+        Returns:
+            最终的 OCR 结果
+        """
         elapsed = 0.0
+        interval = self.poll_interval
+        max_interval = 5.0
+
         while elapsed < timeout:
             status = await self.get_status(doc_id)
             logger.info(
@@ -180,8 +271,11 @@ class GLMOCRClient:
                 return await self.get_result(doc_id)
             if status["status"] == "not_found":
                 raise ServiceClientError(f"doc_id 不存在: {doc_id}")
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
+
+            await asyncio.sleep(interval)
+            elapsed += interval
+            # 指数退避：逐步拉长轮询间隔
+            interval = min(interval * 1.5, max_interval)
 
         raise ServiceClientError(f"任务超时 (>{timeout}s): {doc_id}")
 

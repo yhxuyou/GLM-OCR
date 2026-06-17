@@ -113,7 +113,7 @@ class RegionAggregator:
     # Public API
     # ------------------------------------------------------------------
 
-    async def register_document(self, doc_id: str, total_regions: int) -> None:
+    async def register_document(self, doc_id: str, total_regions: int, *, status: str = "processing") -> None:
         """Register a new document to be aggregated.
 
         Parameters
@@ -122,9 +122,14 @@ class RegionAggregator:
             Unique identifier of the document.
         total_regions:
             Total number of regions the document has been split into.
+            Use 0 when the region count is not yet known (status must be "pending").
+        status:
+            Initial status, either "pending" (region count unknown) or "processing".
         """
-        if total_regions <= 0:
-            raise ValueError("total_regions must be a positive integer")
+        if total_regions < 0:
+            raise ValueError("total_regions must be a non-negative integer")
+        if total_regions == 0 and status != "pending":
+            raise ValueError("total_regions=0 is only allowed when status='pending'")
 
         r = self._ensure_connected()
         meta_key = self._meta_key(doc_id)
@@ -135,7 +140,7 @@ class RegionAggregator:
                 mapping={
                     "total_regions": str(total_regions),
                     "completed": "0",
-                    "status": "processing",
+                    "status": status,
                 },
             )
             # Clean up any stale region hash from a previous attempt.
@@ -143,7 +148,8 @@ class RegionAggregator:
             await pipe.execute()
 
         logger.info(
-            "Registered document %s with %d region(s)", doc_id, total_regions
+            "Registered document %s with %d region(s), status=%s",
+            doc_id, total_regions, status,
         )
 
     async def on_region_complete(

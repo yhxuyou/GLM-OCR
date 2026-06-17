@@ -131,9 +131,9 @@ def create_app(config: GlmOcrConfig) -> FastAPI:
             pipeline: Pipeline = app.state.pipeline
             aggregator: RegionAggregator = app.state.aggregator
 
-            # Register document with aggregator (estimate 1 region initially)
-            # The actual region count will be updated during processing
-            await aggregator.register_document(doc_id, total_regions=1)
+            # Register document with aggregator as pending
+            # The actual region count will be set by AsyncPipeline after layout detection
+            await aggregator.register_document(doc_id, total_regions=0, status="pending")
 
             # Start background processing task
             asyncio.create_task(
@@ -183,6 +183,12 @@ def create_app(config: GlmOcrConfig) -> FastAPI:
                     "completed": 0,
                     "total": 0,
                     "status": "not_found",
+                }
+            elif status == "pending":
+                return {
+                    "completed": 0,
+                    "total": 0,
+                    "status": "pending",
                 }
             elif status == "complete":
                 return {
