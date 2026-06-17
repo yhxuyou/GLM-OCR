@@ -64,6 +64,11 @@ def build_engine_cmd(
             "glm-ocr",
             "--uvicorn-log-level",
             engine_log_level.lower(),
+            # Increase batch capacity for high-concurrency OCR workloads.
+            # Default max-num-seqs (256) is often too low when many documents
+            # are being processed concurrently (e.g. 50 docs × 3 regions = 150 seqs).
+            "--max-num-seqs",
+            os.environ.get("VLLM_MAX_NUM_SEQS", "256"),
         ]
     else:
         raise ValueError(f"Unknown engine: {engine}")

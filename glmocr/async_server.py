@@ -131,9 +131,9 @@ def create_app(config: GlmOcrConfig) -> FastAPI:
             pipeline: Pipeline = app.state.pipeline
             aggregator: RegionAggregator = app.state.aggregator
 
-            # Register document with aggregator (estimate 1 region initially)
-            # The actual region count will be updated during processing
-            await aggregator.register_document(doc_id, total_regions=1)
+            # NOTE: Do NOT register_document here with total_regions=1.
+            # The AsyncPipeline.process_async will register with the accurate
+            # region count after layout detection, avoiding wasteful 0/1 polling.
 
             # Start background processing task
             asyncio.create_task(
@@ -264,11 +264,16 @@ def create_app(config: GlmOcrConfig) -> FastAPI:
         aggregator: RegionAggregator = app.state.aggregator
 
         try:
-            # Check if document exists
-            progress = await aggregator.get_progress(doc_id)
-            if progress["status"] == "unknown":
+            # Wait for document to be registered (layout detection may take a moment)
+            # Retry for up to 30 seconds before giving up
+            for _ in range(60):
+                progress = await aggregator.get_progress(doc_id)
+                if progress["status"] != "unknown":
+                    break
+                await asyncio.sleep(0.5)
+            else:
                 await websocket.send_json(
-                    {"type": "error", "message": "Document not found"}
+                    {"type": "error", "message": "Document not found (registration timeout)"}
                 )
                 await websocket.close(code=1008, reason="Document not found")
                 return
@@ -381,8 +386,16 @@ async def _process_document_background(
     except Exception as e:
         logger.error("Background processing failed for doc %s: %s", doc_id, e)
         logger.debug(traceback.format_exc())
-        # Mark document as failed by setting status to error
-        # For now, we'll just log the error; the document will remain in processing state
+        # Register and mark as failed so callers don't see "not_found"
+        try:
+            await aggregator.register_document(doc_id, total_regions=1)
+            await aggregator.on_region_complete(
+                doc_id,
+                "error",
+                {"error": str(e), "json_result": None, "markdown_result": ""},
+            )
+        except Exception:
+            logger.error("Failed to register error state for doc %s", doc_id)
 
 
 def main():

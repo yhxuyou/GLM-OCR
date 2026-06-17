@@ -63,6 +63,12 @@ pipeline:
     api_host: 127.0.0.1
     api_port: 8080
 
+    # vLLM recommended startup flags for high-concurrency OCR workloads:
+    #   --max-num-seqs 256       # allow more concurrent sequences in continuous batching
+    #   --max-num-batched-tokens 32768  # increase token budget per batch
+    #   --gpu-memory-utilization 0.90   # use more GPU memory for KV cache
+    # Override via VLLM_MAX_NUM_SEQS env var or --engine-args when using launch.py
+
     # Model name included in API requests.
     # Required for mlx_vlm.server (e.g. "mlx-community/GLM-OCR-bf16").
     # Set to `glm-ocr` to match `--served-model-name` when using vLLM/SGLang.
