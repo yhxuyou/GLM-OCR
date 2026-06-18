@@ -1,0 +1,74 @@
+"""
+预处理微服务配置文件
+
+包含所有预处理服务的配置选项
+"""
+
+# 服务配置
+server:
+  host: "0.0.0.0"
+  port: 5003
+  debug: false
+
+# 日志配置
+logging:
+  level: INFO
+  # format: "[%(levelname)s] %(name)s: %(message)s"
+
+# 模型全局配置
+model:
+  # 设备选择：cpu, cuda, cuda:0, cuda:1 等
+  # null 表示自动选择（CUDA 可用时使用 GPU）
+  device: null
+  # CUDA 可见设备
+  cuda_visible_devices: "0"
+
+# 文档检测配置
+doc_detector:
+  # 模型目录（本地路径或 Hugging Face 模型 ID）
+  model_dir: null
+  # 检测阈值
+  threshold: 0.5
+  # 批处理大小
+  batch_size: 1
+  # 输入图像最大尺寸
+  max_input_size: 1024
+  # 是否使用 GPU
+  use_gpu: true
+
+# 方向矫正配置
+orientation_corrector:
+  # 模型目录
+  model_dir: null
+  # 分类阈值
+  threshold: 0.7
+  # 批处理大小
+  batch_size: 1
+  # 输入图像尺寸
+  input_size: 224
+  # 是否启用
+  enabled: true
+
+# 扭曲矫正配置
+dewarp_corrector:
+  # 模型目录
+  model_dir: null
+  # 批处理大小
+  batch_size: 1
+  # 输入图像尺寸
+  input_size: 512
+  # 是否启用
+  enabled: true
+  # 插值方法：bilinear, bicubic, nearest
+  interpolation: "bilinear"
+
+# 预处理流水线配置
+pipeline:
+  # 是否启用文档检测
+  enable_doc_detection: true
+  # 是否启用方向矫正
+  enable_orientation_correction: true
+  # 是否启用扭曲矫正
+  enable_dewarp_correction: true
+  # 是否返回中间结果
+  return_intermediate_results: false

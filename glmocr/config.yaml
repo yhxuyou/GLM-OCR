@@ -104,6 +104,27 @@ pipeline:
     # "Connection pool is full" when runs concurrent requests.
     connection_pool_size: 128
 
+  # ============================================================================
+  # Async OCR Client Configuration
+  # ============================================================================
+  # Configuration for async httpx-based OCR client.
+  # These settings control connection pooling and concurrency for async operations.
+  async_ocr:
+    # httpx connection pool size
+    max_connections: 100
+    # Maximum concurrent requests (semaphore limit)
+    max_concurrent_requests: 50
+
+  # ============================================================================
+  # Async Pipeline Configuration
+  # ============================================================================
+  # Configuration for async pipeline concurrency and batch processing.
+  async_pipeline:
+    # Maximum concurrent regions processed in parallel
+    max_concurrent_regions: 100
+    # Whether to enable batch processing of regions
+    enable_batch_processing: true
+
   # Maximum parallel workers for region recognition
   # Lower values to reduce 503 errors on busy OCR servers
   max_workers: 32
@@ -308,3 +329,26 @@ pipeline:
       22: text
       23: vertical_text
       24: vision_footnote
+
+  # ============================================================================
+  # Redis Configuration
+  # ============================================================================
+  # Redis is used for caching OCR results and managing distributed state.
+  # Configure the connection URL, key prefix, and connection pool size here.
+  # Can also be set via GLMOCR_REDIS_URL environment variable.
+  redis:
+    # Redis connection URL (supports redis://, rediss://, unix:// schemes)
+    # Examples:
+    #   redis://localhost:6379/0
+    #   redis://:password@localhost:6379/0
+    #   rediss://localhost:6379/0  (SSL/TLS)
+    #   unix:///path/to/socket?db=0
+    url: redis://localhost:6379/0
+
+    # Prefix for all Redis keys used by glmocr
+    # Useful for multi-tenant deployments or shared Redis instances
+    key_prefix: glmocr
+
+    # Maximum number of connections in the Redis connection pool
+    # Should be >= pipeline max_workers to avoid connection contention
+    max_connections: 10

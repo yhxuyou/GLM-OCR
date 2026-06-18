@@ -44,12 +44,19 @@ _ENV_MAP: Dict[str, str] = {
     "OCR_API_HOST": "pipeline.ocr_api.api_host",
     "OCR_API_PORT": "pipeline.ocr_api.api_port",
     "OCR_MODEL": "pipeline.ocr_api.model",
+    # Async OCR API settings
+    "ASYNC_OCR_MAX_CONNECTIONS": "pipeline.async_ocr.max_connections",
+    "ASYNC_OCR_MAX_CONCURRENT_REQUESTS": "pipeline.async_ocr.max_concurrent_requests",
+    # Async Pipeline settings
+    "ASYNC_PIPELINE_MAX_CONCURRENT_REGIONS": "pipeline.async_pipeline.max_concurrent_regions",
     # Allow overriding which GPU(s) the layout model uses
     "LAYOUT_CUDA_VISIBLE_DEVICES": "pipeline.layout.cuda_visible_devices",
     # Explicit device for layout model: "cpu", "cuda", "cuda:0", etc.
     "LAYOUT_DEVICE": "pipeline.layout.device",
     # Logging
     "LOG_LEVEL": "logging.level",
+    # Redis
+    "REDIS_URL": "pipeline.redis.url",
 }
 
 PRIMARY_API_KEY_ENV = "ZHIPU_API_KEY"
@@ -105,6 +112,24 @@ class OCRApiConfig(_BaseConfig):
     # HTTP connection pool size. Should be >= pipeline max_workers to avoid
     # "Connection pool is full" when layout mode runs concurrent requests. Default 128.
     connection_pool_size: Optional[int] = 128
+
+
+class AsyncOCRApiConfig(OCRApiConfig):
+    """Async OCR API client configuration (httpx-based)."""
+
+    # httpx connection pool size
+    max_connections: int = 100
+    # Maximum concurrent requests (semaphore limit)
+    max_concurrent_requests: int = 50
+
+
+class AsyncPipelineConfig(_BaseConfig):
+    """Async pipeline concurrency settings."""
+
+    # Maximum concurrent regions processed in parallel
+    max_concurrent_regions: int = 100
+    # Whether to enable batch processing of regions
+    enable_batch_processing: bool = True
 
 
 class MaaSApiConfig(_BaseConfig):
@@ -248,16 +273,27 @@ class LayoutConfig(_BaseConfig):
         )
 
 
+class RedisConfig(_BaseConfig):
+    """Redis connection and caching configuration."""
+
+    url: str = "redis://localhost:6379/0"
+    key_prefix: str = "glmocr"
+    max_connections: int = 10
+
+
 class PipelineConfig(_BaseConfig):
     # MaaS mode configuration (Zhipu cloud API passthrough)
     maas: MaaSApiConfig = Field(default_factory=MaaSApiConfig)
 
     page_loader: PageLoaderConfig = Field(default_factory=PageLoaderConfig)
     ocr_api: OCRApiConfig = Field(default_factory=OCRApiConfig)
+    async_ocr: AsyncOCRApiConfig = Field(default_factory=AsyncOCRApiConfig)
+    async_pipeline: AsyncPipelineConfig = Field(default_factory=AsyncPipelineConfig)
     result_formatter: ResultFormatterConfig = Field(
         default_factory=ResultFormatterConfig
     )
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
+    redis: RedisConfig = Field(default_factory=RedisConfig)
 
     # Parallel recognition workers (VLM/API concurrent requests)
     max_workers: int = 16
@@ -282,7 +318,7 @@ def _coerce_env_value(dotted_path: str, raw: str) -> Any:
     if dotted_path == "pipeline.maas.enabled":
         return raw.strip().lower() in ("maas", "true", "1", "yes")
     # Integer fields
-    if dotted_path.endswith((".api_port", ".request_timeout", ".connect_timeout")):
+    if dotted_path.endswith((".api_port", ".request_timeout", ".connect_timeout", ".max_connections", ".max_concurrent_requests", ".max_concurrent_regions")):
         return int(raw)
     return raw
 
@@ -456,6 +492,8 @@ class GlmOcrConfig(_BaseConfig):
             # Layout GPU binding
             "cuda_visible_devices": "pipeline.layout.cuda_visible_devices",
             "layout_device": "pipeline.layout.device",
+            # Redis
+            "redis_url": "pipeline.redis.url",
         }
 
         # `model` is shared by both MaaS and self-hosted modes.
